@@ -1,0 +1,38 @@
+# trajectories and structures: Modal Volumes, not git
+*.dcd
+*.xtc
+*.trr
+*.nc
+*.h5
+*.pdb
+*.cif
+*.mmcif
+trajectories/
+structures/
+predictions/
+
+# model weights and MSAs
+weights/
+*.a3m
+*.npz
+msa_cache/
+
+# large data; keep designs.parquet tracked if small, else DVC it
+data/raw/
+*.tar.gz
+*.zip
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+*.egg-info/
+
+# modal / env
+.modal.toml
+.env
+
+# os
+.DS_Store
