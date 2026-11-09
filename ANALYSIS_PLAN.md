@@ -11,37 +11,86 @@ is fixed and may only be changed by an appended, dated, reasoned entry in
 
 ---
 
-## 1. Step 3 primary test
+## 1. Step 3: two co-primary claims
 
-TO BE WRITTEN IN FULL BEFORE STEP 3. Fixed already, from SPEC.md:
+Revised 2026-11-09 per HANDOFF-02. BindCraft's Discussion asserts two things
+from box plots with no interval estimate: that interface confidence is a
+powerful binary predictor of binding activity, and that it does not correlate
+with interaction affinity. Both are separately interval-estimable here, so both
+are pre-specified as **co-primary**. Each carries its own claim. This is not a
+primary plus an exploratory follow-up.
 
-- **Primary metric:** `pae_interface_mean`. Every other metric is secondary and
-  exploratory.
-- **Primary population:** the pAE-selected arm (`filter_pass`).
-- **Primary statistic:** AUC separating `binds` from does-not-bind, with
-  bootstrap 95% CI over 10,000 resamples, and whether that CI excludes 0.5.
-- **Multiplicity:** roughly thirty tests across seven metrics, two arms and six
-  baselines. Secondary metrics get Benjamini-Hochberg correction and are
-  reported as exploratory. Only the primary test carries the claim.
-- **Never** pool the two arms into a headline number.
+- **Primary metric:** `pae_interface_mean`, for both claims. Every other metric
+  is secondary and exploratory.
+- **Primary population:** the **378 expressed designs** (`tested`). The
+  `filter_pass` / `unbiased` arm split is deleted; those arms do not exist in
+  Round 2 and the labels are not recoverable. Nothing in this plan is
+  conditioned on an arm.
 
-Still to specify: the exact bootstrap scheme (stratified by outcome or not), the
-tie-handling rule for AUC, the random seed, and the precision-at-k comparison
-against the arm's own base rate.
+**Claim A, binary discrimination.** AUC separating `binds` from does-not-bind
+over the 378, bootstrap 95% CI over 10,000 resamples, and whether that CI
+excludes 0.5. Supported by precision at top k for k in {10, 20, 50} against the
+**14.0%** base rate (53/378), and the calibration curve by metric decile. A
+ranker gives a monotone calibration curve; a threshold gives a flat one.
+
+**Claim B, affinity ranking.** Among the **53 binders only**, correlation
+between the metric and KD. **Spearman primary**, Pearson on log10 KD secondary,
+bootstrap CI. The 53 KD values span 3.92 log10 decades (1.21 nM to 10 uM), so
+the dynamic range is real. Expected CI half-width is about 0.27 at this n
+(Fisher z, 1.96/sqrt(n-3)). **n = 53 goes in the sentence, not a footnote, and
+the CI is reported rather than hidden.**
+
+**Multiplicity.** A and B are co-primary and reported as such. Everything else,
+the remaining six metrics and the six baselines, gets Benjamini-Hochberg
+correction and is reported as exploratory.
+
+Still to specify before Step 3: the exact bootstrap scheme (stratified by
+outcome or not), the AUC tie-handling rule, and the random seed.
 
 ## 2. Step 3 power, for the record
 
-The detectability floor is set by the number of positives, not by anything in
-the pipeline. Hanley-McNeil standard errors, balanced groups:
+The detectability floor is set by the number of positives. Hanley-McNeil
+standard errors at the actual Step 3 split, **53 binders against 325
+non-binders**:
+
+| True AUC | SE | 95% CI | Excludes 0.5 |
+|---|---|---|---|
+| 0.60 | 0.044 | [0.514, 0.686] | yes |
+| 0.65 | 0.043 | [0.565, 0.735] | yes |
+| 0.70 | 0.042 | [0.617, 0.783] | yes |
+| 0.75 | 0.040 | [0.671, 0.829] | yes |
+
+So Step 3 resolves a moderate effect comfortably and a weak one not at all. A
+weak effect is operationally useless anyway, so that limit costs nothing. The
+Step 0 item 7 gate is recorded as **passed** on this basis.
+
+Step 4 is the tighter constraint, because its sets are about 20 per side:
 
 | n per group | AUC 0.65 | AUC 0.70 | AUC 0.75 |
 |---|---|---|---|
 | 20 | CI [0.479, 0.821], does not exclude 0.5 | CI [0.537, 0.863] | CI [0.597, 0.903] |
 | 40 | CI low 0.530 | CI low 0.585 | CI low 0.643 |
 
-This is why the Step 0 item 7 gate is set at 25 positives. A null result below
-that count is uninterpretable rather than informative, which is the one outcome
-with no publishable reading in either direction.
+## 2a. The truncation analysis, two tiers kept separate
+
+Replaces the deleted `unbiased` secondary population.
+
+**Tier 1, measured, and this is the tier that carries the argument.** All 1131
+submitted sequences are public (`embeddings.zip`, `esm2_650m.csv`, keyed by raw
+sequence; all 400 tested match exactly, leaving exactly 731 untested). Compare
+tested against untested on sequence length, GRAVY, net charge at pH 7, and ESM2
+pseudo-log-likelihood. The last is one of the three real components of the
+selection rule. Report distribution overlap. This is a measurement.
+
+**Tier 2, model-based, labelled as such wherever it appears.** The untested 731
+**were never assayed and have no binding labels**, and their AF2 metrics would
+cost about 2.9x the Step 2 fold budget, so no AUC can be computed on them. Tier
+2 therefore states, under an explicitly declared extrapolation of
+`p(binds | metric)` beyond the observed range plus an assumed shift in the
+untested metric distribution, how far the untested would have to differ before
+Claim A overturns. Deliverable is one sentence of the form *the result survives
+unless the untested designs differ from the tested ones by more than X*. It must
+never be presented as a measurement.
 
 ## 3. Step 4 variance rule
 
@@ -94,9 +143,12 @@ set, which the table in section 2 shows is the real constraint on the whole step
 ## 5. Things that would invalidate this plan if done
 
 - Computing any Step 3 statistic before this file is final and committed.
-- Changing the primary metric, the primary population, the `binds` threshold,
-  the denominator or the arm definitions after seeing any outcome.
+- Changing either co-primary claim, the primary metric, the primary population,
+  the `binds` threshold or the denominator after seeing any outcome.
+- Presenting the model-based truncation bound (tier 2) as a measurement, or
+  merging it into tier 1.
+- Demoting Claim B to exploratory after seeing its CI.
 - Choosing the Step 4 percentile threshold or the equilibration discard after
   seeing the data they affect.
-- Reporting a pooled-arm headline number.
+- Reporting a pooled-arm headline number (moot: no arm labels exist).
 - Reporting a single-replica MD result.
