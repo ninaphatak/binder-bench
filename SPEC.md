@@ -78,39 +78,51 @@ code becomes the input to a later experiment.
 
 ---
 
-## THE SELECTION-BIAS PROBLEM — read before touching the data
+## THE SELECTION-BIAS PROBLEM, read before touching the data
 
-Competitors submitted far more designs than Adaptyv could assay. Round 2 tested
-400. Selection into that 400 was **not random**: it was split into arms, one
-of which took the best designs **by `pAE_interaction`**, the very metric under
-test. Adaptyv's own writeup notes the pseudo-random arm had a different
-affinity range from the selected arm, so the arms demonstrably differ.
+REVISED 2026-11-09 (HANDOFF-02, after Step 0 item 2). The earlier version of
+this section described **Round 1's** arms and labelled them Round 2's. What
+follows is from primary text: the competition README, `adaptyvbio/competition_metrics`,
+and the lessons preprint (10.1101/2025.04.17.648362).
 
-Consequences:
+Competitors submitted far more designs than Adaptyv could assay. What actually
+happened:
 
-1. **Range restriction.** The observable score axis is a narrow slice near the
-   good end. A score needs variance to rank anything; restricting the range
-   attenuates AUC toward 0.5 even for a metric that is informative across the
-   full range.
-2. **The bias runs in the direction of the hypothesis.** A naive pooled AUC
-   would come out weak, and a reviewer answers: of course it did, you only
-   tested designs that already scored well. Unanswerable after the fact.
-3. **Collider effects.** Conditioning on "got tested" when testing depended on
-   pAE induces spurious associations inside the tested set. Designs admitted
-   through a non-pAE arm got in for some other reason, which may itself
-   correlate with binding.
-4. **The 14% success rate is conditional.** It is success among designs
-   pre-enriched for high confidence, not the field's base rate. Do not quote it
-   as "binder design succeeds 14% of the time."
+- **Round 2, 400 tested out of 1131 submitted.** 100 selected by a **rank
+  average of three metrics**: iPTM, PAE interaction and ESM2 pseudo-log-likelihood,
+  with fractional ranking for ties. Plus **300 chosen by hand** by Adaptyv staff
+  for novelty, creativity and method diversity, under the constraint that every
+  designer got at least one design tested.
+- **Round 1, 201 tested out of 726.** 100 by **iPAE alone** plus 101 hand-selected.
+- **There is no pseudo-random arm in either round.**
 
-**How this spec handles it:** by making the restricted population the
-*intended* population (the residual-information question above), and treating
-the full-range question as a clearly-labelled secondary analysis on the
-pseudo-random arm only.
+Consequences, as revised:
 
-`selection_arm` must be recoverable per design. **If it cannot be recovered
-from the competition repo, stop and report — this is a blocker, not something
-to work around.**
+1. **Only 100 of 400 had any confidence metric in the selection objective,** and
+   there it was one of three components alongside a language-model likelihood.
+   There is no pAE-only arm in Round 2.
+2. **The resulting enrichment is mild and attenuating, not inflating.** Any
+   pull toward the low-pae end biases *against* finding an effect, so a null
+   result cannot be dismissed as an artifact of selection, and a positive result
+   is conservative.
+3. **Per-design arm labels are unpublished and the ranking is not
+   reconstructible.** The three metrics are published only for the 400 tested,
+   not the 1131 submitted. Reconstruction would need 731 extra folds, about 2.9x
+   the Step 2 budget. Do not attempt it.
+4. **The 14% success rate is conditional** on having been chosen for assay. Do
+   not quote it as the field's base rate.
+
+**How this spec handles it:** the analysis population is the 378 expressed
+designs, described plainly as *designs Adaptyv chose to assay*, score-based for
+a quarter of them and human-curated for the rest. No correction is applied. The
+truncation is **measured** instead, see Step 1.
+
+**Status of the threshold-versus-ranker framing.** Retained for now. The spread
+of `pae_interaction` among tested designs is wide (6.80 to 27.89, median 16.17,
+binders 7.57 to 27.46), which is consistent with mild truncation, but spread
+among the tested says nothing on its own about the 731 untested. The framing is
+robust to not yet knowing, so it stays until the Step 1 truncation measurement
+is in hand. Revisit then, not before.
 
 ---
 
@@ -138,12 +150,21 @@ Report back after each numbered item. Do not proceed past item 7 without Nina.
 1. Inventory `enrich-bench`: what exists, what runs, what is half-written.
    Three lines. Do not refactor it.
 2. Clone `github.com/adaptyvbio/egfr_competition_2`. Confirm per-design
-   `selection_arm` labels exist. **Report each arm's name, its design count,
-   and its binder count.**
-3. Inventory **Round 3** as well (the round that characterised 601 proteins
-   against EGFR): is the data public in the same shape, what was its selection
-   rule, is the assay comparable to Round 2? Do not download predictions. Just
-   establish whether it can be pooled or analysed in parallel.
+   `selection_arm` labels exist. **DONE 2026-11-09: they do not exist.** No arm,
+   batch or group field in any of the six result files, and the README does not
+   describe the selection. Denominators confirmed: 400 designs plus 2 controls,
+   22 expressed none, 378 expressed, 53 bound.
+3. ~~Inventory Round 3~~ **REVISED 2026-11-09: there is no Round 3.** 601 is the
+   two-round total (201 + 400). The real question is whether **Round 1's 201
+   designs** can be pooled with Round 2. ANSWERED, item 3 complete: **no.**
+   Round 1 contributes about 5 binders (202 rows, only 8 carrying a KD, one of
+   those the Cetuximab control, 3 of the rest pinned at the 1e-5 to 2.3e-5
+   assay ceiling; preprint hit rate 5/201). Against roughly +9% on the
+   positives: Round 1's `result_summary.csv` has no `binding` or `expression`
+   columns at all, labels exist only at replicate level with 162 of 461
+   replicates "unknown", expression was 73% against 94 to 95%, the selection
+   rule differed, and its `pae_interaction` was computed without templates.
+   Round 2 alone. Round 1 is an out-of-sample descriptive check at most.
 4. Check whether either repo ships predicted structures or confidence metrics.
    Note them as a comparison point, **not** as our predictions.
 5. Confirm `modal` is installed and authenticated.
@@ -151,13 +172,13 @@ Report back after each numbered item. Do not proceed past item 7 without Nina.
    `DECISIONS.md`. New-account credits do not cover 378 GPU folds. Every cost
    estimate later in this spec is checked against that number, not against a
    vague sense of "reasonable."
-7. **THE GATE.** Count the binders in Round 2's pAE-selected arm.
-   - **25 or more:** proceed with Round 2 alone, as specified.
-   - **Fewer than 25:** stop. An AUC on fewer than roughly 25 positives has an
-     interval too wide to exclude anything, and an underpowered null is the one
-     outcome with no publishable reading in either direction. Report the count
-     alongside Round 3's numbers and let Nina decide: pool the rounds, analyse
-     them in parallel, or change the question.
+7. **THE GATE. PASSED 2026-11-09.** Revised: there is no pAE-selected arm to
+   count, so the gate is evaluated on the pooled population of 378 expressed
+   designs. **53 binders against 325 non-binders.** Hanley-McNeil SE on AUC at
+   that split is 0.042 to 0.044 across AUC 0.60 to 0.75, giving a 95% CI of
+   about plus or minus 0.083. That resolves a moderate effect but not a weak
+   one. A weak effect is operationally useless anyway, so the limit costs
+   nothing. Proceed with Round 2 alone.
 
 ## Step 1: Build the dataset
 
@@ -168,7 +189,7 @@ Produce `data/designs.parquet`:
 | `design_id` | |
 | `sequence` | binder amino acid sequence |
 | `design_method` | self-reported by competitor; messy, keep verbatim |
-| `selection_arm` | pAE-selected / rule-based / pseudo-random (see above) |
+| ~~`selection_arm`~~ | DROPPED 2026-11-09: unpublished and not reconstructible |
 | `expressed` | bool |
 | `binds` | bool |
 | `kd` | nullable float |
@@ -184,19 +205,46 @@ the structure prediction was right — that is a different failure mode
 **Label definition.** Define `binds` from the assay, not from a leaderboard
 rank. Write down the threshold and its source.
 
-**Analysis populations.** Define two, up front:
-- **Primary (`filter_pass`)**: the pAE-selected arm. The post-filter
-  population. This is where the residual-information question lives.
-- **Secondary (`unbiased`)**: the pseudo-random arm. Smaller n, wider CIs, but
-  the closest thing to a full-range sample.
+**Analysis populations.** REVISED 2026-11-09. There is one, not two. The
+`filter_pass` / `unbiased` split assumed arms that do not exist in Round 2 and
+cannot be recovered.
 
-### Also build: the truncation picture
+- **Primary (`tested`)**: the 378 expressed designs. Described as *designs
+  Adaptyv chose to assay*, score-based for 100 of 400 and human-curated for the
+  other 300.
+- **`selection_arm` is dropped from the schema.** It is unpublished and not
+  reconstructible. If Adaptyv supply labels later they feed a robustness check
+  only, never the primary analysis.
 
-If all *submitted* designs are public (not just the tested 400), record their
-self-reported or recomputed pAE distribution. Plot submitted vs tested. This
-quantifies exactly how much of the range is missing instead of leaving it as
-prose. Do this even though the reframed question does not depend on it — it is
-the figure that pre-empts the reviewer.
+### Also build: the truncation picture. NOW REQUIRED, not optional.
+
+This replaces the deleted secondary population and is the load-bearing answer
+to the selection-bias objection. It is constructible from published data today.
+
+**All 1131 submitted sequences are public**, in the competition's
+`embeddings.zip` as `esm2_650m.csv`, 1131 rows keyed by raw sequence. All 400
+tested sequences match exactly, 0 missing, leaving exactly **731 untested**.
+
+Two tiers, reported separately:
+
+1. **Measured, and this is the one that carries the argument.** Compare the 378
+   tested against the 731 untested on features computable without any structure
+   prediction: sequence length, GRAVY, net charge at pH 7 (all free) and **ESM2
+   pseudo-log-likelihood** (a few CPU-hours, and it is one of the three real
+   components of the selection rule). Heavy overlap means the selection was not
+   strongly score-driven; sharp separation quantifies the truncation. Either way
+   it is a measurement.
+2. **Model-based bound, reported separately and labelled as model-based.** How
+   far would the untested designs have to differ before the primary result
+   overturns. State the extrapolation explicitly: it requires an assumed
+   `p(binds | metric)` extended past the observed range and an assumed shift in
+   the untested metric distribution, because **the untested designs were never
+   assayed and have no binding labels, and never will.** Deliverable is one
+   sentence of the form *the result survives unless the untested designs differ
+   from the tested ones by more than X*. Do not present it as a measurement.
+
+The AF2 metrics for the untested 731 are out of reach: 731 extra folds is about
+2.9x the Step 2 budget. Do not plan around having them.
 
 ### Target construct
 
@@ -248,6 +296,13 @@ Recycles, number of models/seeds, MSA mode (target-only), templates off,
 relaxation off, random seed policy. Record the model weights version/hash and
 **the GPU type the container ran on** — GPU architecture can affect numerics,
 and you want that in the provenance.
+
+### Provenance
+
+Mirror `enrich-bench`'s `costs.csv` schema, including `n_inputs`, `git_sha` and
+`git_dirty`. It is better provenance than the rest of this step asks for:
+`n_inputs` is what makes dollars-per-design recoverable later, and a sha is
+meaningless if the tree was dirty.
 
 ### Metrics to record per design
 
@@ -334,20 +389,23 @@ Rules for the Modal layer:
 
 ### Positive control, before the pilot
 
-Before folding any competition design, fold **3 to 5 known EGFR binders** with
-measured affinity against your chosen construct. Candidates: cetuximab-derived
-fragments, or the EGF/TGF-alpha-derived designs Adaptyv flagged as landing near
-1e-6 M. They must come out with strong interface scores.
+REVISED 2026-11-09. The controls are already in the dataset and were assayed on
+this exact construct, which is better than an external panel because the assay
+matches: **Cetuximab_scFv at KD 6.6 nM and Human_EGF at KD 7.6 nM** (both
+single-digit nM, not the ~1e-6 M this spec previously expected). Fold both
+before any competition design. They must come out with strong interface scores.
 
 If they do not, something upstream is wrong, most likely the target construct,
 possibly chain ordering or the MSA. This control costs minutes and is the only
 cheap way to catch a wrong construct before it eats the whole GPU budget. **Do
 not proceed to the pilot until it passes.**
 
-Caveat to state in the paper: known binders like cetuximab are in the models'
-training data, so they will score well partly from memorisation. The control
-validates the *pipeline* (construct, chains, MSA), not the *metric*. Do not
-present it as evidence the metric works.
+Caveat to state in the paper, and it matters **more** now that the controls are
+the in-dataset ones: cetuximab and EGF are squarely in the models' training
+data, so they will score well partly from memorisation. The control validates
+the *pipeline* (construct, chain ordering, MSA) and **never the metric**. State
+that explicitly wherever these two appear. Do not present them as evidence the
+metric works.
 
 ### Compute discipline — pilot first, always
 
@@ -374,25 +432,39 @@ Outputs go in `results/`.
 Write to `ANALYSIS_PLAN.md` and commit it **before** computing any statistic,
 so the commit is timestamped ahead of the results:
 
+REVISED 2026-11-09. Step 3 now carries **two co-primary claims**, not one.
+BindCraft's Discussion asserts both of the following from box plots with no
+interval estimate, and both are separately interval-estimable from this
+dataset. Putting intervals on the two sentences the field's pipelines rest on
+is the paper.
+
 - **One primary metric.** Use `pae_interface_mean`. It is what the field filters
-  on and what the competition selected by, so it is the metric whose value is
-  actually in question. Every other metric is secondary and exploratory.
-- **One primary population**: the pAE-selected arm.
-- **One primary statistic**: AUC, and whether its 95% CI excludes 0.5.
-- **Multiplicity.** Seven metrics across two arms plus six baselines is roughly
-  thirty tests. If one comes out significant after that, it is noise, not a
-  finding. Secondary metrics get Benjamini-Hochberg correction and are
-  reported as exploratory. Only the pre-specified primary test carries the
-  claim.
+  on and one of the three the competition selected by, so it is the metric whose
+  value is actually in question. Every other metric is secondary and exploratory.
+- **One primary population**: the 378 expressed designs.
+- **Claim A, binary discrimination.** AUC separating binder from non-binder over
+  the 378, bootstrap 95% CI, 10k resamples, and whether that CI excludes 0.5.
+  Plus precision at top k for k in {10, 20, 50} against the 14.0% base rate, and
+  the calibration curve by metric decile.
+- **Claim B, affinity ranking.** Among the **53 binders only**, correlation
+  between the metric and KD. Spearman primary, Pearson on log KD secondary,
+  bootstrap CI. The 53 KD values span 3.92 log10 decades (1.21 nM to 10 uM), so
+  there is real dynamic range. The CI will be roughly plus or minus 0.27 at this
+  n (Fisher z, verified). **Report n=53 in the sentence, not a footnote, and
+  report the CI rather than hiding it.**
+- **Multiplicity.** A and B are co-primary and each carries its own claim, since
+  BindCraft asserts both; state that split explicitly rather than treating one as
+  exploratory. Everything else, seven metrics plus six baselines, gets
+  Benjamini-Hochberg correction and is reported as exploratory.
 
 This costs an hour and it is the difference between a result and a fishing
 expedition. Given that the paper's entire argument is about rigour in
 evaluation, an unregistered analysis plan would be the obvious thing for a
 reviewer to attack.
 
-### Primary analysis: residual information within `filter_pass`
+### Primary analysis: Claim A on the `tested` population
 
-On the pAE-selected arm only:
+On the 378 expressed designs:
 
 - **AUC** for each metric separating `binds` from `does not bind`, with
   bootstrap 95% CI (10k resamples).
@@ -400,17 +472,24 @@ On the pAE-selected arm only:
   the metric carries no residual signal among designs that passed the filter:
   it is a threshold, not a ranker.
 - **Precision at top k** for k in {10, 20, 50}: having already filtered, if you
-  then kept the top k by this metric, how many bound? Compare to the arm's own
-  base rate. This is the operationally meaningful number.
+  then kept the top k by this metric, how many bound? Compare to the population's
+  own 14.0% base rate. This is the operationally meaningful number.
 - **Calibration curve.** Bin by metric decile, plot observed binding rate per
   bin. A ranker gives a monotone curve; a threshold gives a flat one. This
   figure is the clearest statement of the finding either way.
 
-### Secondary analysis: the full-range question
+### Claim B: affinity ranking among the binders
 
-Same statistics on the `unbiased` (pseudo-random) arm, reported separately and
-explicitly labelled as the smaller, wider-CI, full-range estimate. Never pool
-the arms into one headline number.
+Among the 53 binders only, metric against KD. Spearman primary with bootstrap
+CI, Pearson on log KD secondary. This is the direct test of BindCraft's "does
+not correlate with the interaction affinity." Report n and CI in the sentence.
+
+### Secondary analysis: the truncation picture
+
+REPLACES the deleted `unbiased` arm, which does not exist. Run the two tiers
+defined in Step 1: the measured tested-versus-untested comparison on length,
+GRAVY, net charge and ESM2 pLL, then the model-based bound reported separately
+and labelled as model-based.
 
 ### Baselines — non-negotiable
 
@@ -439,13 +518,15 @@ generators may fail differently and pooling can hide it.
 ### Acceptance criteria
 
 - `results/figures/calibration.{png,svg}` — observed binding rate by metric
-  decile, per arm
+  decile, on the `tested` population
 - `results/figures/score_distributions.{png,svg}` — binders vs non-binders,
-  faceted by arm
+  on the `tested` population
 - `results/figures/truncation.{png,svg}` — submitted vs tested score
-  distribution. OPTIONAL: only if submissions are public, and only once the
-  required figures are done. The reframed question does not depend on it.
-- `results/tables/auc.csv` — metric, arm, n, AUC, CI low, CI high
+  distribution. **REQUIRED as of 2026-11-09.** Submissions are public (all 1131),
+  and this figure replaces the deleted secondary population.
+- `results/tables/auc.csv`: metric, n, AUC, CI low, CI high (no arm column)
+- `results/tables/affinity_correlation.csv`: Claim B, metric, n, Spearman,
+  CI low, CI high
 - `results/tables/precision_at_k.csv`
 - `results/tables/cross_model_agreement.csv` — AF2 vs Boltz-2 rank
   correlation. CONDITIONAL: only if the deferred Boltz-2 run happened.
@@ -466,8 +547,8 @@ expensive step.
 ### Define the sets before looking at any MD output
 
 - **Confident-wrong:** high primary metric, did not bind. Choose the threshold
-  by percentile (e.g. top quartile within `filter_pass`) and **write it down
-  first.**
+  by percentile (e.g. top quartile within the `tested` population) and **write
+  it down first.**
 - **Confident-right control:** high primary metric, did bind, **matched on
   score range.** Without this matched control the MD finding means nothing,
   because any complex looks unstable if you squint at it long enough.
@@ -489,12 +570,30 @@ can question.
 Deviate only with a recorded reason in `DECISIONS.md`. Do not invent settings,
 and do not block on obtaining the Palermo lab's protocol.
 
-Engine: OpenMM or GROMACS on Modal, or the lab's own stack on institutional HPC
-if that is cheaper at this trajectory volume. Raise the choice with Nina.
+**Engine and compute target. REVISED 2026-11-09: GROMACS on UCLA Hoffman2, not
+Modal.** Arithmetic: the 378-design fold is roughly 20 GPU-hours, while this
+triage tier is 40 complexes x 5 replicas = **200 jobs** of 10 ns on a solvated
+complex of roughly 50,000 to 80,000 atoms, which is about an order of magnitude
+more. Whatever covers the fold will not cover the MD at any plausible rate. A
+GROMACS job array on institutional HPC is different engineering from a Modal
+fan-out and must not be written twice, so decide before building anything for
+Step 4. Step 2's folding stays on Modal as specified and is comfortably within
+budget. **Raise this with Nina before any Step 4 engineering.**
 
-**Triage first:** 10 ns x 3 independent replicas per complex. This catches
-gross interface failure cheaply. Extend to ~100 ns only where triage is
-ambiguous.
+**Triage first:** REVISED 2026-11-09 to **10 ns x 5 independent replicas** per
+complex, three being the absolute floor. The unit of analysis is the design, not
+the replica, so at 20 vs 20 the scalar needs a true AUC near 0.70 before its CI
+clears 0.5; replicas shrink per-design measurement error rather than changing n,
+and five cost the same as one 50 ns run. Each replica gets its own initial
+velocity seed. Discard the first 20% of each run, fixed in advance. Extend to
+~100 ns only where triage is ambiguous. See ANALYSIS_PLAN.md for the ICC
+escalation rule.
+
+**What this tier may and may not claim.** Neither 10 ns nor 100 ns observes
+unbinding: for a micromolar binder k_off puts the complex lifetime in the
+millisecond to second range. The admissible claim is that the predicted
+interface is not a free energy minimum under CHARMM36m. "The complex
+dissociates" is not available at these lengths.
 
 Three replicas is the minimum, not a nicety. A single trajectory crossing a
 barrier by luck is how you get a result that does not reproduce, and
@@ -503,9 +602,10 @@ numbers, never only the pooled mean.**
 
 ### Modal layout for MD
 
-Fan out over `(design_id, replica_index)` tuples with `.starmap()`. Each is an
-independent container, so 40 complexes x 3 replicas is 120 jobs. Separate image
-with OpenMM; separate `max_containers` cap.
+APPLIES ONLY IF Nina chooses Modal over Hoffman2 for Step 4. Fan out over
+`(design_id, replica_index)` tuples with `.starmap()`. Each is an independent
+container, so 40 complexes x 5 replicas is **200 jobs**, not the 120 this spec
+originally assumed. Separate image with OpenMM; separate `max_containers` cap.
 
 Checkpoint trajectories to the results Volume periodically, not only at the
 end, and make each job resumable from its last checkpoint. A 100 ns run that
@@ -541,13 +641,15 @@ binding" but "here is a cheap dynamical signal that does."
 - raising `max_containers` above the pilot cap
 - running the full 378-design fold after the pilot
 - spending more than 20 GPU-hours in one go
-- changing the `binds` threshold, the denominator, or the arm definitions
+- changing the `binds` threshold or the denominator (the arm definitions are
+  gone; see the selection-bias section)
 - starting Step 4
 
 **Never:**
 - use a confidence score computed by anyone else as our prediction
 - call the public MMseqs2 API once per design
-- pool the selection arms into a headline statistic
+- pool selection arms into a headline statistic (moot as of 2026-11-09: no
+  recoverable arm labels exist, so there is nothing to pool)
 - drop designs without logging the count and reason
 - report an MD result from a single replica
 - tune a threshold after seeing the outcome it affects
