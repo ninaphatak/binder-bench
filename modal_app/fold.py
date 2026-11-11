@@ -79,6 +79,10 @@ SALVAGE_MARGIN_SEC = 420
 #: Seconds a container lingers after its last input.
 SCALEDOWN_WINDOW_SEC = 5
 
+#: Container-local destination for the AlphaFold parameters. Local disk, not
+#: the Volume: see the comment in fold_chunk and src/binder_bench/weights.py.
+LOCAL_WEIGHTS_DIR = "/tmp/weights"
+
 #: The cached single target MSA, staged once by modal_app/stage.py.
 TARGET_MSA_PATH = f"{DATA_DIR}/target_msa/EGFR_ectodomain_P00533_25_645.a3m"
 
@@ -217,6 +221,7 @@ def fold_chunk(chunk: list[dict]) -> list[dict]:
     Each item of ``chunk`` is ``{"design_id": str, "sequence": str}``.
     """
     import shutil
+    import time
 
     from binder_bench.foldconfig import (
         FoldConfig,
@@ -232,6 +237,7 @@ def fold_chunk(chunk: list[dict]) -> list[dict]:
     )
     from binder_bench.parse_colabfold import parse_colabfold_output, to_metric_records
     from binder_bench.target import EXPECTED_LENGTH, target_sequence
+    from binder_bench.weights import stage_weights_locally
 
     cfg = FoldConfig()
     target = target_sequence()  # checksum-verified, raises on mismatch
@@ -270,7 +276,21 @@ def fold_chunk(chunk: list[dict]) -> list[dict]:
             target_a3m,
         )
 
-    cmd = build_command(inputs, outputs, CACHE_DIR, config=cfg)
+    # WEIGHTS ONTO LOCAL DISK FIRST. Reading parameters directly off the
+    # Volume is what stalled L4, A100-40GB and H100 for over 40 minutes each
+    # without producing a single prediction. ColabFold's np.load returns a lazy
+    # NpzFile and flat_params_to_haiku then touches every one of thousands of
+    # arrays, so a network filesystem pays latency thousands of times, twice
+    # per model. See src/binder_bench/weights.py for the stack that proved it.
+    #
+    # Paid once per container and amortised over the whole chunk.
+    t_stage = time.monotonic()
+    local_data = stage_weights_locally(
+        CACHE_DIR, LOCAL_WEIGHTS_DIR, cfg.model_type, cfg.num_models
+    )
+    stage_seconds = time.monotonic() - t_stage
+
+    cmd = build_command(inputs, outputs, local_data, config=cfg)
     assert_no_ambiguous_flags(cmd)
 
     print(
@@ -372,6 +392,7 @@ def fold_chunk(chunk: list[dict]) -> list[dict]:
             # Provenance. GPU type is recorded because architecture can affect
             # numerics and we want that in the record, not inferred later.
             "gpu_type": gpu_type,
+            "weight_stage_seconds": round(stage_seconds, 2),
             "chunk_seconds": round(elapsed, 2),
             "chunk_n_todo": len(todo),
             "chunk_hit_deadline": hit_deadline,

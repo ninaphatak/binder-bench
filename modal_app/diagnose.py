@@ -240,8 +240,20 @@ def diagnose(
         f"complex={complex_len} models={num_models} ==="
     )
 
+    # Weights onto LOCAL disk first. Reading them straight off the Volume is
+    # what stalled three cards for 40 minutes each.
+    from binder_bench.weights import stage_weights_locally
+
     cfg = FoldConfig(num_models=num_models)
-    cmd = build_command(inputs, outputs, CACHE_DIR, config=cfg)
+
+    t_stage = time.monotonic()
+    local_data = stage_weights_locally(
+        CACHE_DIR, "/tmp/weights", cfg.model_type, num_models
+    )
+    stage_seconds = time.monotonic() - t_stage
+    _say(f"[weights] staging took {stage_seconds:.1f}s")
+
+    cmd = build_command(inputs, outputs, local_data, config=cfg)
 
     # One variable at a time, appended rather than baked into FoldConfig, so
     # the frozen configuration stays frozen while the stall is attributed.
@@ -310,6 +322,7 @@ def diagnose(
         "seconds": round(elapsed, 1),
         "seconds_per_model": round(elapsed / num_models, 1),
         "n_output_files": len(produced),
+        "weight_stage_seconds": round(stage_seconds, 1),
         "jobname": colabfold_jobname(design_id),
         "env": interesting,
     }
