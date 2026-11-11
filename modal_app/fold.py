@@ -449,6 +449,25 @@ def fold_chunk(chunk: list[dict]) -> list[dict]:
             }
         )
 
+    # Keep ColabFold's own log. It is the ONLY place the per-model recycle
+    # count is recorded, and that count varies per design because
+    # AF2-multimer's recycle_early_stop_tolerance of 0.5 is active. Step 3 has
+    # to be able to test whether recycle count confounds the metric, which
+    # needs the counts, and they exist nowhere else: the scores JSON does not
+    # carry them. Named by chunk leader so concurrent containers cannot
+    # overwrite one another.
+    cf_log = outputs / "log.txt"
+    if cf_log.exists():
+        log_dest = (
+            Path(RESULTS_DIR) / "colabfold_logs"
+            / f"{colabfold_jobname(todo[0]['design_id'])}.log"
+        )
+        log_dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(cf_log, log_dest)
+        print(f"[fold] saved ColabFold log to {log_dest}", flush=True)
+    else:
+        print(f"[fold] WARNING: no ColabFold log at {cf_log}", flush=True)
+
     # Cost per design is only knowable once we know how many actually finished.
     # Dividing the chunk's seconds by the designs we ASKED for would understate
     # the real cost whenever a chunk overruns, which is the one case where the

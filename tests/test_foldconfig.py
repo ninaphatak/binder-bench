@@ -180,3 +180,22 @@ def test_unified_memory_env_overrides_colabfolds_import_time_defaults():
 
 def test_unified_memory_setting_is_in_the_provenance_record():
     assert "disable_unified_memory" in FoldConfig().as_record()
+
+
+def test_recycle_early_stop_tolerance_is_explicit_not_inherited():
+    """ColabFold's CLI default of None does not mean off: it hands over to
+    AF2-multimer's own config default of 0.5, so designs silently get
+    different numbers of recycles. The value must be in the record."""
+    cfg = FoldConfig()
+    assert cfg.recycle_early_stop_tolerance == 0.5
+    cmd = build_command("in.a3m", "out", "/weights")
+    assert cmd[cmd.index("--recycle-early-stop-tolerance") + 1] == "0.5"
+    assert "recycle_early_stop_tolerance" in cfg.as_record()
+
+
+def test_early_stop_tolerance_can_be_forced_off_for_a_uniformity_check():
+    """Zero tolerance runs every design to the full recycle count, which is
+    the sensitivity check for whether variable recycling moves the metric."""
+    cfg = FoldConfig(recycle_early_stop_tolerance=0.0)
+    cmd = build_command("in.a3m", "out", "/weights", config=cfg)
+    assert cmd[cmd.index("--recycle-early-stop-tolerance") + 1] == "0.0"
