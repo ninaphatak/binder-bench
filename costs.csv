@@ -1,3 +1,5 @@
 timestamp,function_name,gpu_type,gpu_seconds,cpu_seconds,dollars_est,n_inputs,git_sha,git_dirty,produces_results,notes
 2026-11-11T01:06:50Z,stage.verify,cpu,3.242,3.242,,1,d18c5d2572b33c4eacad5017f1c5b281ef582058,True,False,"staging, cpu only"
 2026-11-11T01:23:20Z,stage.verify,cpu,8.299,8.299,,1,bd1f82a1370e5ae9bd80f4a750ca7b24b9273592,True,False,"staging, cpu only"
+2026-11-11T01:25:22Z,stage.weights,cpu,107.618,107.618,,1,0d159abb38120edf4a5f13464423e437c922d8fb,False,False,"staging, cpu only"
+2026-11-11T01:28:05Z,stage.weights,cpu,125.997,125.997,,1,0d159abb38120edf4a5f13464423e437c922d8fb,True,False,"staging, cpu only"

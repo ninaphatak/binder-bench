@@ -32,6 +32,10 @@ from binder_bench.modal_images import (  # noqa: E402
 
 app = modal.App("binder-bench-stage")
 
+# AF2-multimer v3 weights. The designs are binder/target complexes, so the
+# multimer parameters are the ones required; the monomer set would not do.
+MODEL_TYPE = "alphafold2_multimer_v3"
+
 weights = modal.Volume.from_name("bb-weights", create_if_missing=True)
 data = modal.Volume.from_name("bb-data", create_if_missing=True)
 
@@ -48,44 +52,57 @@ data = modal.Volume.from_name("bb-data", create_if_missing=True)
     cpu=2.0,
 )
 def download_weights() -> dict:
-    """Run ColabFold's own downloader once, into the weights Volume.
+    """Download the AlphaFold2 parameters into the weights Volume.
 
-    The documented flow from the ColabFold Docker wiki is exactly:
-        python -m colabfold.download
-    with the host cache directory mounted at /cache. Containers must never
-    re-download per invocation, which is why this is its own function.
+    NOT via `python -m colabfold.download`. That is what the ColabFold Docker
+    wiki documents, and it exits 0 after ~107 seconds having written nothing to
+    our volume, because it targets its own default cache directory inside the
+    container, which is discarded when the container exits. There is no flag on
+    that entrypoint to redirect it.
+
+    So we call ColabFold's own download function directly with an explicit
+    data_dir. Same code path, just told where to put things.
     """
-    import subprocess
+    import inspect
 
-    cache = Path(CACHE_DIR)
-    before = sorted(p.name for p in cache.glob("*"))
-
-    proc = subprocess.run(
-        [sys.executable, "-m", "colabfold.download"],
-        capture_output=True,
-        text=True,
+    from colabfold.download import (
+        default_data_dir,
+        download_alphafold_params,
     )
-    # Surface stderr rather than swallowing it. A silent failure here produces
-    # an empty weights volume and a confusing GPU failure later.
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"colabfold.download failed with code {proc.returncode}\n"
-            f"--- stdout ---\n{proc.stdout[-4000:]}\n"
-            f"--- stderr ---\n{proc.stderr[-4000:]}"
-        )
 
+    dest = Path(CACHE_DIR)
+    dest.mkdir(parents=True, exist_ok=True)
+
+    report = {
+        "colabfold_default_data_dir": str(default_data_dir),
+        "download_signature": str(inspect.signature(download_alphafold_params)),
+        "requested_data_dir": str(dest),
+        "model_type": MODEL_TYPE,
+    }
+
+    download_alphafold_params(MODEL_TYPE, dest)
     weights.commit()
 
-    after = sorted(p.name for p in cache.glob("*"))
-    total = sum(p.stat().st_size for p in cache.rglob("*") if p.is_file())
-    return {
-        "entries_before": before,
-        "entries_after": after,
-        "bytes_total": total,
-        "gib_total": round(total / 2**30, 2),
-        "stdout_tail": proc.stdout[-1500:],
-        **provenance(),
-    }
+    files = sorted(p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file())
+    total = sum(p.stat().st_size for p in dest.rglob("*") if p.is_file())
+
+    if total == 0:
+        raise RuntimeError(
+            f"Weights download wrote nothing to {dest}. Default data dir is "
+            f"{default_data_dir}. Do not proceed to a GPU run: every fold would "
+            f"fail or silently re-download."
+        )
+
+    report.update(
+        {
+            "file_count": len(files),
+            "files_sample": files[:12],
+            "bytes_total": total,
+            "gib_total": round(total / 2**30, 2),
+            **provenance(),
+        }
+    )
+    return report
 
 
 @app.function(
