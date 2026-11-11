@@ -58,9 +58,27 @@ PARAM_PATTERNS = {
 def required_files(model_type: str, num_models: int) -> list[str]:
     """Names, relative to the params directory, that must exist locally.
 
-    Only the model files actually used are listed. ColabFold takes models in
-    order, so ``num_models=1`` needs model 1 alone, and copying the other four
-    would be 1.5 GiB of pointless network traffic.
+    ALL FIVE parameter files are required regardless of ``num_models``, and
+    that is not caution, it is ColabFold's actual behaviour. From
+    colabfold/alphafold/models.py::load_models_and_params::
+
+        model_build_order = [3, 4, 5, 1, 2]
+        models_need_compilation = [3]          # for multimer
+
+    It walks the whole build order loading every model's parameters, compiles
+    only model 3's graph, and swaps the other four sets of parameters into that
+    same compiled runner to avoid recompiling. Only at the very end does it
+    select ``num_models`` of them. So ``--num-models 1`` still reads all five
+    files, and it reads model 3 FIRST.
+
+    An earlier version of this function copied only models 1..num_models, which
+    was wrong twice over: wrong count and wrong order. It failed immediately
+    with a FileNotFoundError for params_model_3_multimer_v3.npz. The saving it
+    was chasing is about three seconds, since the Volume sustains 648 MiB/s on
+    a sequential read, so there was never anything to optimise here.
+
+    ``num_models`` is still validated, because a caller passing something
+    absurd has a bug worth surfacing.
     """
     if model_type not in PARAM_PATTERNS:
         raise ValueError(
@@ -70,7 +88,9 @@ def required_files(model_type: str, num_models: int) -> list[str]:
         raise ValueError(f"num_models must be 1 to 5, got {num_models}")
 
     pattern = PARAM_PATTERNS[model_type]
-    names = [pattern.format(n=n) for n in range(1, num_models + 1)]
+    # In ColabFold's own build order, so a partial copy fails on its first
+    # missing file rather than part way through a fold.
+    names = [pattern.format(n=n) for n in (3, 4, 5, 1, 2)]
     names.append(SUCCESS_MARKERS[model_type])
     return names
 
