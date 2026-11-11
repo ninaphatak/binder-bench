@@ -413,7 +413,11 @@ def diagnose(
     # it exits, which looks exactly like a hang and loses everything if killed.
     # The first diagnostic run was launched without it and ran silent for
     # minutes; ColabFold's own asctime prefixes saved the measurement.
-    child_env = dict(os.environ, PYTHONUNBUFFERED="1")
+    # See foldconfig.DISABLE_UNIFIED_MEMORY. Pre-set so ColabFold's
+    # import-time guard does not force 4x the card's memory.
+    from binder_bench.foldconfig import UNIFIED_MEMORY_OFF_ENV
+
+    child_env = dict(os.environ, PYTHONUNBUFFERED="1", **UNIFIED_MEMORY_OFF_ENV)
 
     started = time.monotonic()
     proc = subprocess.Popen(

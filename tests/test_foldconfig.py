@@ -158,3 +158,25 @@ def test_alternate_config_flows_through_to_the_command():
     assert cmd[cmd.index("--pair-mode") + 1] == "unpaired_paired"
     assert cmd[cmd.index("--num-models") + 1] == "1"
     assert expected_prediction_count(cfg) == 1
+
+
+def test_unified_memory_is_disabled_by_flag():
+    """ColabFold asks for 4x the card's memory unless told not to. Three cards
+    each stalled over 40 minutes in jax batched_device_put because of it."""
+    assert FoldConfig().disable_unified_memory is True
+    cmd = build_command("in.a3m", "out", "/weights")
+    assert "--disable-unified-memory" in cmd
+
+
+def test_unified_memory_env_overrides_colabfolds_import_time_defaults():
+    """ColabFold only sets these "if k not in os.environ", so pre-setting them
+    wins. The values must therefore be present and must not be its defaults."""
+    from binder_bench.foldconfig import UNIFIED_MEMORY_OFF_ENV
+
+    assert UNIFIED_MEMORY_OFF_ENV["TF_FORCE_UNIFIED_MEMORY"] == "0"
+    frac = float(UNIFIED_MEMORY_OFF_ENV["XLA_PYTHON_CLIENT_MEM_FRACTION"])
+    assert 0 < frac <= 1.0, "a fraction above 1.0 oversubscribes the card again"
+
+
+def test_unified_memory_setting_is_in_the_provenance_record():
+    assert "disable_unified_memory" in FoldConfig().as_record()
