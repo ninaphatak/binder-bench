@@ -221,9 +221,26 @@ def verify() -> dict:
         text=True,
     )
 
+    # MSA DEPTH CHECK. A 621-residue query that returns in 26 seconds could
+    # mean a warm server cache, or it could mean the alignment came back with
+    # only the query in it. The second case would silently turn the whole
+    # "target MSA plus single-sequence binder" strategy into single-sequence
+    # for both chains, which is a different experiment. Count the sequences.
+    depth = {}
+    for f in (msa_dir.glob("*.a3m") if msa_dir.exists() else []):
+        txt = f.read_text()
+        n = txt.count(">")
+        first = txt.splitlines()[:4]
+        depth[f.name] = {
+            "n_sequences": n,
+            "bytes": f.stat().st_size,
+            "head": first,
+        }
+
     return {
         "python": sys.version.split()[0],
         "jax": jax_report.stdout.strip() or jax_report.stderr.strip()[-300:],
+        "msa_depth": depth,
         "weights_param_files": params[:10],
         "weights_param_count": len(params),
         "weights_gib": round(total / 2**30, 2),
