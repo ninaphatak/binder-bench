@@ -90,11 +90,43 @@ def aggregate_across_models(per_model: list[dict[str, float]]) -> dict[str, floa
         out[f"{key}__max"] = float(arr.max())
 
     # Secondary, for comparability only: the value from the model ColabFold
-    # would rank first. Lower pae_interaction is better, higher ipTM is better,
-    # and ColabFold ranks multimers by ipTM, so rank_001 is the max-ipTM model.
-    if any("iptm" in m for m in per_model):
-        best = max(per_model, key=lambda m: m.get("iptm", float("-inf")))
+    # itself ranked first.
+    #
+    # This used to infer rank_001 as the maximum-ipTM model. That was wrong.
+    # ColabFold ranks on `result["ranking_confidence"]` (batch.py:534, 617),
+    # which for AlphaFold-multimer is a weighted combination of ipTM and pTM
+    # rather than ipTM alone, and it is produced inside AlphaFold's own model
+    # runner so it cannot be recomputed from the scores JSON. On top of that
+    # the JSON rounds ipTM to two decimals, so ties are common. Inferring the
+    # rank could therefore name a different model than ColabFold did, which
+    # would quietly corrupt the one number whose entire purpose is
+    # comparability with the competition's published values.
+    #
+    # So the true rank is REQUIRED, not inferred. parse_colabfold carries it
+    # through from the output filename, where ColabFold writes it after
+    # reranking, and that is ground truth.
+    ranked = [m for m in per_model if m.get("rank") == 1]
+    if len(ranked) > 1:
+        raise ValueError(
+            f"{len(ranked)} predictions claim rank 1. The output directory "
+            f"probably mixes two runs. Refusing to pick one."
+        )
+    if ranked:
+        best = ranked[0]
         out["pae_interface_mean__rank001"] = float(best["pae_interface_mean"])
-        out["iptm__rank001"] = float(best.get("iptm", float("nan")))
+        if "iptm" in best:
+            out["iptm__rank001"] = float(best["iptm"])
+        if "model_number" in best:
+            out["rank001_model_number"] = int(best["model_number"])
+    elif any("rank" in m for m in per_model):
+        # Ranks are present but none is 1, so the set is incomplete.
+        raise ValueError(
+            "Per-model records carry ranks but none is rank 1. The run may "
+            "have died before ColabFold finished reranking. Refusing to "
+            "report a comparability value that is not the real rank_001."
+        )
+    # If no record carries a rank at all, the rank_001 keys are simply absent.
+    # That is correct: the mean across models is the primary estimator and does
+    # not need them, and a missing key is better than a guessed one.
 
     return out

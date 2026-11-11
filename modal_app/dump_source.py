@@ -16,8 +16,20 @@ app = modal.App("binder-bench-dump")
 def dump() -> dict:
     import colabfold
     pkg = Path(colabfold.__file__).parent
-    want = ["batch.py", "input.py", "colabfold.py", "utils.py", "download.py"]
-    return {n: (pkg / n).read_text() for n in want if (pkg / n).exists()}
+    want = [
+        "batch.py",
+        "input.py",
+        "colabfold.py",
+        "utils.py",
+        "download.py",
+        "alphafold/models.py",
+    ]
+    out = {}
+    for n in want:
+        f = pkg / n
+        if f.exists():
+            out[n.replace("/", "__")] = f.read_text()
+    return out
 
 
 @app.local_entrypoint()
