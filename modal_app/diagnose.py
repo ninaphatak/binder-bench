@@ -156,6 +156,16 @@ def diagnose(design_id: str, sequence: str, num_models: int = 1) -> dict:
     _say(f"[cmd] {' '.join(cmd)}")
 
     # STREAMED, not captured. This is the whole point of this module.
+    #
+    # PYTHONUNBUFFERED is required, not optional. ColabFold's setup_logging
+    # installs a TqdmHandler, so its log lines go out through tqdm.write to
+    # STDOUT, and CPython block-buffers stdout when it is a pipe rather than a
+    # terminal. Without this the child emits nothing until its buffer fills or
+    # it exits, which looks exactly like a hang and loses everything if killed.
+    # The first diagnostic run was launched without it and ran silent for
+    # minutes; ColabFold's own asctime prefixes saved the measurement.
+    child_env = dict(os.environ, PYTHONUNBUFFERED="1")
+
     started = time.monotonic()
     proc = subprocess.Popen(
         cmd,
@@ -163,6 +173,7 @@ def diagnose(design_id: str, sequence: str, num_models: int = 1) -> dict:
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        env=child_env,
     )
     assert proc.stdout is not None
     for line in proc.stdout:
