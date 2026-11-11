@@ -1,0 +1,2 @@
+timestamp,function_name,gpu_type,gpu_seconds,cpu_seconds,dollars_est,n_inputs,git_sha,git_dirty,produces_results,notes
+2026-11-11T01:06:50Z,stage.verify,cpu,3.242,3.242,,1,d18c5d2572b33c4eacad5017f1c5b281ef582058,True,False,"staging, cpu only"
