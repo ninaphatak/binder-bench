@@ -60,16 +60,20 @@ PILOT_MAX_CONTAINERS = 4
 
 #: Designs per container, DERIVED FROM MEASUREMENT rather than guessed.
 #:
-#: Measured on an L4 at complex length 674: a steady-state recycle costs 19s,
-#: so a warm four-recycle model costs 76s, and the one-off compile plus warmup
-#: is 69s. Scaled to the design set's median 699-residue complex that is about
-#: 83s per model, so a five-model design costs roughly 7 minutes.
+#: Measured over 44 pilot models on an L4: 107.4s per model on average
+#: (median 91.5, max 198.5) across the real design-length distribution, so a
+#: five-model design costs about 537s. The controls alone suggested 83s per
+#: model, which was optimistic because control.Human_EGF at 674 residues sits
+#: near the 10th percentile of complex length while the design median is 699
+#: and the maximum 871.
 #:
-#: project_cost.safe_chunk_size(83.2, num_models=5, timeout_sec=7200,
-#: salvage_margin_sec=420, weight_stage_sec=60) returns 12, which keeps a
-#: chunk inside its own deadline with headroom for the longest designs. The
-#: previous value of 5 was a guess made before any timing existed.
-CHUNK_SIZE = 12
+#: project_cost.safe_chunk_size(107.4, num_models=5, timeout_sec=7200,
+#: salvage_margin_sec=420, weight_stage_sec=60) returns 9, giving about 4833s
+#: of folding against a deadline near 6720s. At the earlier value of 12 a chunk
+#: would have needed roughly 6450s and would have grazed or crossed the
+#: deadline on nearly every chunk, salvaging partial results each time and
+#: spending the margin instead of holding it in reserve.
+CHUNK_SIZE = 9
 
 #: Explicit. Modal's default of 300s would kill these folds mid-run. Budgeted
 #: generously per chunk: five designs at five models each.
@@ -237,8 +241,11 @@ def fold_chunk(chunk: list[dict]) -> list[dict]:
 
     Each item of ``chunk`` is ``{"design_id": str, "sequence": str}``.
     """
+    import math
     import shutil
     import time
+
+    import numpy as np
 
     from binder_bench.foldconfig import (
         FoldConfig,
@@ -253,6 +260,10 @@ def fold_chunk(chunk: list[dict]) -> list[dict]:
         write_complex_a3m,
     )
     from binder_bench.parse_colabfold import parse_colabfold_output, to_metric_records
+    from binder_bench.control_validation import (
+        contact_residue_pairs,
+        pae_interface_contacts_mean,
+    )
     from binder_bench.target import EXPECTED_LENGTH, target_sequence
     from binder_bench.weights import stage_weights_locally
 
@@ -408,6 +419,44 @@ def fold_chunk(chunk: list[dict]) -> list[dict]:
             shutil.copy2(src, tgt)
             kept.append(tgt.name)
 
+        # SECONDARY METRIC S1, pre-registered in ANALYSIS_PLAN.md 1a:
+        # pae_interface_contacts_mean, the same PAE restricted to residue pairs
+        # actually in contact, which removes the target-size dilution that
+        # makes Adaptyv's whole-block average scale with the 621-residue
+        # target. Computed here because the PAE matrices are in memory now.
+        #
+        # The raw matrices are ALSO saved, compressed, because they are the
+        # raw model output: any future metric over them then needs no re-fold,
+        # and a re-fold is not bit-identical (XLA kernel selection moved ipTM
+        # by 0.03 between two runs of the same model and seed).
+        s1_per_model: list[float] = []
+        pae_to_save: dict[str, np.ndarray] = {}
+        for pred in job.predictions:
+            if pred.pae is None:
+                continue
+            tgt = dest / Path(pred.structure_path).name
+            b_idx, t_idx = contact_residue_pairs(tgt, binder_len)
+            s1_per_model.append(
+                pae_interface_contacts_mean(pred.pae, b_idx, t_idx)
+            )
+            # float16 is ample: PAE is bounded at about 32 Angstrom and three
+            # significant digits is far finer than the quantity's meaning.
+            pae_to_save[pred.model_id] = pred.pae.astype(np.float16)
+
+        if pae_to_save:
+            pae_path = Path(RESULTS_DIR) / "pae" / f"{jobname}.npz"
+            pae_path.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(pae_path, **pae_to_save)
+
+        s1_clean = [v for v in s1_per_model if not math.isnan(v)]
+        s1_summary = {
+            "pae_interface_contacts_mean__mean": (
+                sum(s1_clean) / len(s1_clean) if s1_clean else float("nan")
+            ),
+            "pae_interface_contacts_mean__per_model": s1_per_model,
+            "n_models_with_contacts": len(s1_clean),
+        }
+
         record = {
             "design_id": design_id,
             "colabfold_jobname": jobname,
@@ -416,6 +465,7 @@ def fold_chunk(chunk: list[dict]) -> list[dict]:
             "target_length": EXPECTED_LENGTH,
             "complex_length": binder_len + EXPECTED_LENGTH,
             "metrics": aggregated,
+            "secondary_metrics": s1_summary,
             "per_model": records,
             "structures": kept,
             # Provenance. GPU type is recorded because architecture can affect
@@ -444,6 +494,9 @@ def fold_chunk(chunk: list[dict]) -> list[dict]:
                 "design_id": design_id,
                 "status": "folded",
                 "pae_interface_mean": aggregated.get("pae_interface_mean__mean"),
+                "pae_interface_contacts_mean": s1_summary[
+                    "pae_interface_contacts_mean__mean"
+                ],
                 "iptm_mean": aggregated.get("iptm__mean"),
                 "gpu_type": gpu_type,
             }

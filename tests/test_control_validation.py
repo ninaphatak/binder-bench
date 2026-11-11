@@ -219,3 +219,95 @@ def test_epitope_residues_are_within_the_construct():
     for name, ep in CONTROL_EPITOPES.items():
         assert min(ep) >= 1, name
         assert max(ep) <= 621, name
+
+
+# ---------------------------------------------------------------------------
+# Secondary metric S1: PAE restricted to contacting pairs
+# ---------------------------------------------------------------------------
+
+
+def test_contact_pairs_index_into_the_pae_matrix(structure):
+    """Target indices must be offset by the binder length, since the PAE is
+    indexed over the whole complex with the binder first."""
+    from binder_bench.control_validation import contact_residue_pairs
+
+    path = structure(binder_len=10, target_len=100, contact_start=20)
+    b, t = contact_residue_pairs(path, 10)
+    assert b.size == t.size > 0
+    assert b.max() < 10, "binder indices must lie in the binder block"
+    assert t.min() >= 10, "target indices must be offset past the binder"
+    assert t.max() < 110
+
+
+def test_contact_pairs_use_residue_order_not_residue_numbering(tmp_path):
+    """Residue numbers need not start at 1; the PAE is indexed by position."""
+    from binder_bench.control_validation import contact_residue_pairs
+
+    p = tmp_path / "offset.pdb"
+    p.write_text(
+        "ATOM      1  CA  ALA A 501       0.000   0.000   0.000  1.00  0.00           C\n"
+        "ATOM      2  CA  ALA A 502      20.000   0.000   0.000  1.00  0.00           C\n"
+        "TER\n"
+        "ATOM      3  CA  ALA B 900       0.000   3.000   0.000  1.00  0.00           C\n"
+        "ATOM      4  CA  ALA B 901      50.000  50.000   0.000  1.00  0.00           C\n"
+        "TER\nEND\n"
+    )
+    b, t = contact_residue_pairs(p, 2)
+    # Binder residue 501 is position 0; target residue 900 is position 0, so
+    # index 2 once offset by the binder length.
+    assert set(zip(b.tolist(), t.tolist())) == {(0, 2)}
+
+
+def test_s1_averages_only_contacting_pairs(structure):
+    """The whole point: the diluting non-contact pairs must be excluded."""
+    import numpy as np
+
+    from binder_bench.control_validation import (
+        contact_residue_pairs,
+        pae_interface_contacts_mean,
+    )
+
+    path = structure(binder_len=10, target_len=100, contact_start=20)
+    b, t = contact_residue_pairs(path, 10)
+
+    # PAE is 2.0 on contacting pairs and 30.0 everywhere else.
+    pae = np.full((110, 110), 30.0)
+    pae[b, t] = 2.0
+    pae[t, b] = 2.0
+
+    s1 = pae_interface_contacts_mean(pae, b, t)
+    assert s1 == pytest.approx(2.0)
+
+    # Adaptyv's definition over the whole block is dominated by the 30s, which
+    # is exactly the target-size dilution S1 exists to remove.
+    adaptyv = (pae[:10, 10:].mean() + pae[10:, :10].mean()) / 2
+    assert adaptyv > 25.0
+
+
+def test_s1_is_nan_not_zero_when_nothing_contacts():
+    """Zero would read as perfect confidence for an undocked design."""
+    import numpy as np
+
+    from binder_bench.control_validation import pae_interface_contacts_mean
+
+    out = pae_interface_contacts_mean(
+        np.full((20, 20), 5.0), np.empty(0, dtype=int), np.empty(0, dtype=int)
+    )
+    assert np.isnan(out)
+
+
+def test_s1_is_symmetrised_like_the_primary(structure):
+    """Only WHICH pairs enter the average may differ from the primary."""
+    import numpy as np
+
+    from binder_bench.control_validation import (
+        contact_residue_pairs,
+        pae_interface_contacts_mean,
+    )
+
+    path = structure(binder_len=10, target_len=100, contact_start=20)
+    b, t = contact_residue_pairs(path, 10)
+    pae = np.zeros((110, 110))
+    pae[b, t] = 4.0   # forward direction only
+    pae[t, b] = 10.0  # reverse direction only
+    assert pae_interface_contacts_mean(pae, b, t) == pytest.approx(7.0)
