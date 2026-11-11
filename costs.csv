@@ -8,3 +8,7 @@ timestamp,function_name,gpu_type,gpu_seconds,cpu_seconds,dollars_est,n_inputs,gi
 2026-11-11T01:30:31Z,stage.verify,cpu,20.693,20.693,,1,f790bfd4b00d81a3d1e2ffc4a0e70eb612f97afc,True,False,"staging, cpu only"
 2026-11-11T01:30:47Z,stage.verify,cpu,7.310,7.310,,1,f790bfd4b00d81a3d1e2ffc4a0e70eb612f97afc,True,False,"staging, cpu only"
 2026-11-11T04:02:25Z,fold_chunk,L4,7642.446,7642.446,1.696623,2,56a3775cd4e0b03ec647e36541190d35b2fc7f76,False,False,pilot limit=0
+2026-11-11T04:52:00Z,diagnose,L4,2400.000,2400.000,0.532800,1,eadb0a8,False,False,"RECONSTRUCTED not measured: launched before track_cost was added to diagnose.py. Container ran its full 2400s timeout folding ONE model of control.Human_EGF at 674 residues and did not finish. No ColabFold log survived because this launch predated the PYTHONUNBUFFERED fix."
+2026-11-11T05:20:17Z,diagnose,A100-40GB,2403.960,2403.960,1.401509,1,71f5408ecce58725182e325d0d58951ac3f01c83,True,False,control.Human_EGF num_models=1
+2026-11-11T05:20:21Z,diagnose,H100,2403.340,2403.340,2.636464,1,71f5408ecce58725182e325d0d58951ac3f01c83,True,False,control.Human_EGF num_models=1
+2026-11-11T05:23:26Z,inspect_image,cpu,7.105,7.105,,1,71f5408ecce58725182e325d0d58951ac3f01c83,True,False,image capability probe
