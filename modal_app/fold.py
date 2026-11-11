@@ -239,6 +239,11 @@ def fold_chunk(chunk: list[dict]) -> list[dict]:
     from binder_bench.target import EXPECTED_LENGTH, target_sequence
     from binder_bench.weights import stage_weights_locally
 
+    # Clock starts HERE, not when colabfold_batch launches. Everything before
+    # that point (weight staging, A3M writing, nvidia-smi) spends the same
+    # container budget Modal is counting down.
+    container_started = time.monotonic()
+
     cfg = FoldConfig()
     target = target_sequence()  # checksum-verified, raises on mismatch
     gpu_type = _gpu_name()
@@ -300,12 +305,19 @@ def fold_chunk(chunk: list[dict]) -> list[dict]:
     )
     print(f"[fold] {' '.join(cmd)}", flush=True)
 
-    # Hold back time to parse and commit. The container's own clock started
-    # before this point, so the deadline is measured against the budget that
-    # remains, not against the full timeout.
+    # Hold back time to parse and commit, measured against the budget that
+    # REMAINS rather than the full timeout. Subtracting the setup already spent
+    # is the whole point: if the deadline overran the container's real budget,
+    # Modal would kill us first and the Volume would never be committed, which
+    # is precisely the failure the salvage margin exists to prevent.
     container_budget = float(os.environ.get("BB_FOLD_TIMEOUT_SEC", FOLD_TIMEOUT_SEC))
-    deadline = max(container_budget - SALVAGE_MARGIN_SEC, 60.0)
-    print(f"[fold] colabfold deadline {deadline:.0f}s of {container_budget:.0f}s", flush=True)
+    setup_spent = time.monotonic() - container_started
+    deadline = max(container_budget - setup_spent - SALVAGE_MARGIN_SEC, 60.0)
+    print(
+        f"[fold] setup took {setup_spent:.0f}s; colabfold deadline "
+        f"{deadline:.0f}s of {container_budget:.0f}s budget",
+        flush=True,
+    )
 
     rc, tail, elapsed, hit_deadline = _run_streamed(cmd, deadline)
 
