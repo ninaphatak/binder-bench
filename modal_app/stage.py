@@ -16,9 +16,14 @@ from pathlib import Path
 
 import modal
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from images import (  # noqa: E402
+# Import ONLY from the binder_bench package, never from a sibling file in this
+# directory. Modal ships `binder_bench` into the container via
+# add_local_python_source; it does not ship this directory, so a sibling import
+# resolves locally and then fails inside the container. That failure is a
+# container STARTUP error, which crash-loops: Modal keeps relaunching
+# containers, and retries=0 does not prevent it because retries govern function
+# failures, not startup. tests/test_modal_imports.py enforces this rule.
+from binder_bench.modal_images import (  # noqa: E402
     CACHE_DIR,
     DATA_DIR,
     colabfold_image,
