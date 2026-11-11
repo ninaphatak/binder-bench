@@ -49,12 +49,39 @@ SUBDOMAINS_APPROX = {
     "IV_CR2": (505, 645),
 }
 
+# The sequence itself, embedded. NOT read from a file.
+#
+# It lived in data/*.fasta until 2026-11-10, when the first container run
+# failed with FileNotFoundError on /data/egfr_ectodomain_P00533_25-645.fasta.
+# Two things were wrong with that. The repo file is never uploaded to the
+# container, and the path was computed as parents[2] / "data", which resolves
+# to the repo root locally but to the root filesystem in the container, so it
+# silently pointed at the mounted data Volume. A pinned construct belongs in
+# code that ships with the package, not in a file that may or may not be
+# mounted. 621 characters is nothing.
+_SEQUENCE = (
+    "LEEKKVCQGTSNKLTQLGTFEDHFLSLQRMFNNCEVVLGNLEITYVQRNYDLSFLKTIQE"
+    "VAGYVLIALNTVERIPLENLQIIRGNMYYENSYALAVLSNYDANKTGLKELPMRNLQEIL"
+    "HGAVRFSNNPALCNVESIQWRDIVSSDFLSNMSMDFQNHLGSCQKCDPSCPNGSCWGAGE"
+    "ENCQKLTKIICAQQCSGRCRGKSPSDCCHNQCAAGCTGPRESDCLVCRKFRDEATCKDTC"
+    "PPLMLYNPTTYQMDVNPEGKYSFGATCVKKCPRNYVVTDHGSCVRACGADSYEMEEDGVR"
+    "KCKKCEGPCRKVCNGIGIGEFKDSLSINATNIKHFKNCTSISGDLHILPVAFRGDSFTHT"
+    "PPLDPQELDILKTVKEITGFLLIQAWPENRTDLHAFENLEIIRGRTKQHGQFSLAVVSLN"
+    "ITSLGLRSLKEISDGDVIISGNKNLCYANTINWKKLFGTSGQKTKIISNRGENSCKATGQ"
+    "VCHALCSPEGCWGPEPRDCVSCRNVSRGRECVDKCNLLEGEPREFVENSECIQCHPECLP"
+    "QAMNITCTGRGPDNCIQCAHYIDGPHCVKTCPAGVMGENNTLVWKYADAGHVCHLCHPNC"
+    "TYGCTGPGLEGCPTNGPKIPS"
+)
+
 _FASTA = Path(__file__).resolve().parents[2] / "data" / (
     "egfr_ectodomain_P00533_25-645.fasta"
 )
 
 
-def _read_cached_fasta() -> str:
+def _read_cached_fasta() -> str | None:
+    """The on-disk copy, for cross-checking locally. Absent in containers."""
+    if not _FASTA.exists():
+        return None
     lines = _FASTA.read_text().splitlines()
     return "".join(ln.strip() for ln in lines if not ln.startswith(">"))
 
@@ -66,7 +93,7 @@ def target_sequence() -> str:
     recorded checksum. A silent mismatch here is the failure mode this whole
     module exists to prevent.
     """
-    seq = _read_cached_fasta()
+    seq = _SEQUENCE
 
     if len(seq) != EXPECTED_LENGTH:
         raise ValueError(
@@ -84,6 +111,13 @@ def target_sequence() -> str:
             f"  got      {got}\n"
             f"The cached FASTA has changed. Do not fold against it until the "
             f"change is understood and DECISIONS.md is updated."
+        )
+
+    on_disk = _read_cached_fasta()
+    if on_disk is not None and on_disk != seq:
+        raise ValueError(
+            "The embedded EGFR sequence and data/egfr_ectodomain_P00533_25-645.fasta "
+            "disagree. One of them has been edited. Resolve before folding."
         )
 
     return seq

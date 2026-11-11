@@ -3,3 +3,7 @@ timestamp,function_name,gpu_type,gpu_seconds,cpu_seconds,dollars_est,n_inputs,gi
 2026-11-11T01:23:20Z,stage.verify,cpu,8.299,8.299,,1,bd1f82a1370e5ae9bd80f4a750ca7b24b9273592,True,False,"staging, cpu only"
 2026-11-11T01:25:22Z,stage.weights,cpu,107.618,107.618,,1,0d159abb38120edf4a5f13464423e437c922d8fb,False,False,"staging, cpu only"
 2026-11-11T01:28:05Z,stage.weights,cpu,125.997,125.997,,1,0d159abb38120edf4a5f13464423e437c922d8fb,True,False,"staging, cpu only"
+2026-11-11T01:28:45Z,stage.msa,cpu,6.849,6.849,,1,f790bfd4b00d81a3d1e2ffc4a0e70eb612f97afc,False,False,"staging, cpu only"
+2026-11-11T01:29:48Z,stage.msa,cpu,26.212,26.212,,1,f790bfd4b00d81a3d1e2ffc4a0e70eb612f97afc,True,False,"staging, cpu only"
+2026-11-11T01:30:31Z,stage.verify,cpu,20.693,20.693,,1,f790bfd4b00d81a3d1e2ffc4a0e70eb612f97afc,True,False,"staging, cpu only"
+2026-11-11T01:30:47Z,stage.verify,cpu,7.310,7.310,,1,f790bfd4b00d81a3d1e2ffc4a0e70eb612f97afc,True,False,"staging, cpu only"
