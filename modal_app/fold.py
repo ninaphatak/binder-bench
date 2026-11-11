@@ -112,6 +112,13 @@ def _run_streamed(
     import threading
     import time
 
+    # PYTHONUNBUFFERED is load bearing, not boilerplate. CPython block-buffers
+    # stdout when it is a pipe rather than a terminal, so a child that prints
+    # progress to stdout would deliver nothing for minutes and then a burst,
+    # and would lose the buffer entirely if killed. Streaming the output is
+    # pointless if the child decides not to emit it.
+    child_env = dict(os.environ, PYTHONUNBUFFERED="1")
+
     started = time.monotonic()
     proc = subprocess.Popen(
         cmd,
@@ -119,6 +126,7 @@ def _run_streamed(
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        env=child_env,
     )
     tail: collections.deque[str] = collections.deque(maxlen=tail_lines)
 
@@ -147,6 +155,31 @@ def _run_streamed(
 
     reader.join(timeout=15)
     return proc.returncode, list(tail), time.monotonic() - started, hit_deadline
+
+
+def _gpu_name() -> str:
+    """The card's own name, from the driver.
+
+    Not ``os.environ["MODAL_GPU_TYPE"]``. That variable does not exist: the
+    diagnostic run printed MODAL_GPU_TYPE=unknown on a container that
+    nvidia-smi correctly identified as an L4. Every fold record would have
+    stored "unknown" for the one provenance field SPEC.md asks for because
+    architecture can affect numerics.
+    """
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except Exception as exc:  # noqa: BLE001 - provenance must not kill a fold
+        return f"unavailable: {type(exc).__name__}"
+    if proc.returncode != 0:
+        return f"nvidia-smi rc={proc.returncode}"
+    return proc.stdout.strip().splitlines()[0].strip() or "empty"
 
 
 def _fold_record_path(design_id: str) -> Path:
@@ -202,7 +235,7 @@ def fold_chunk(chunk: list[dict]) -> list[dict]:
 
     cfg = FoldConfig()
     target = target_sequence()  # checksum-verified, raises on mismatch
-    gpu_type = os.environ.get("MODAL_GPU_TYPE", "unknown")
+    gpu_type = _gpu_name()
 
     # Refuse a batch where two design_ids would collapse onto one ColabFold job
     # name, because the second would silently overwrite the first's outputs.
@@ -465,7 +498,12 @@ def main(
     """
     import pandas as pd
 
-    from binder_bench.costs import assert_within_budget, spend_to_date, track_cost
+    from binder_bench.costs import (
+        assert_within_budget,
+        spend_to_date,
+        track_cost,
+        worst_case_usd,
+    )
 
     df = pd.read_parquet(designs_parquet)
     controls = df[df["is_control"]] if include_controls else df.iloc[0:0]
@@ -478,8 +516,16 @@ def main(
     chunks = [items[i : i + CHUNK_SIZE] for i in range(0, len(items), CHUNK_SIZE)]
 
     print(f"[spend so far] ${spend_to_date():.4f}")
-    # Conservative ceiling: assume every chunk runs to its full timeout.
-    projected = len(chunks) * (FOLD_TIMEOUT_SEC / 3600) * 2.5
+    # Conservative ceiling at the SELECTED card's real rate, assuming every
+    # chunk runs to its full timeout. A flat assumed rate here would have
+    # understated an A100 run by threefold.
+    # One full timeout PER CHUNK, not per container. max_containers bounds
+    # wall-clock time, not the bill: four containers each running three chunks
+    # cost the same as twelve running one.
+    projected = worst_case_usd(
+        gpu, n_containers=len(chunks), timeout_sec=FOLD_TIMEOUT_SEC
+    )
+    print(f"[budget] worst case on {gpu}: ${projected:.2f}")
     assert_within_budget(projected)
 
     print(
