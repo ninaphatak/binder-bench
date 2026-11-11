@@ -40,6 +40,27 @@ the dynamic range is real. Expected CI half-width is about 0.27 at this n
 (Fisher z, 1.96/sqrt(n-3)). **n = 53 goes in the sentence, not a footnote, and
 the CI is reported rather than hidden.**
 
+### Claim B: the KD ceiling, pre-specified before any correlation is computed
+
+**9 of the 53 binders carry KD exactly 1.000e-05 M.** The assay's highest
+antigen concentration was 1000 nM, which is 1e-6 M, so 1e-5 sits a full decade
+above anything actually flowed over the probe, and nine identical values at
+that exact point is a reporting ceiling rather than nine measurements. Treating
+them as real numbers would tie 17% of the data at the extreme of the range and
+distort the correlation.
+
+Fixed now, before computing anything:
+
+- **Primary for Claim B:** Spearman on the **44 binders with KD below the
+  ceiling**, since a censored value carries no rank information beyond "worse
+  than everything measured". Report n = 44 in the sentence.
+- **Secondary:** Spearman on all 53 with the 9 ceiling values retained as tied
+  at the maximum, reported alongside so the effect of the choice is visible.
+- Report both regardless of which is more favourable. Choosing between them
+  after seeing the numbers is exactly the tuning the hard rules forbid.
+- The CI will widen at n = 44 relative to n = 53, to roughly plus or minus 0.30
+  (Fisher z). That is the honest interval and it gets reported, not hidden.
+
 **Multiplicity.** A and B are co-primary and reported as such. Everything else,
 the remaining six metrics and the six baselines, gets Benjamini-Hochberg
 correction and is reported as exploratory.
@@ -148,6 +169,8 @@ set, which the table in section 2 shows is the real constraint on the whole step
 - Presenting the model-based truncation bound (tier 2) as a measurement, or
   merging it into tier 1.
 - Demoting Claim B to exploratory after seeing its CI.
+- Choosing between the censored and uncensored Claim B variants after seeing
+  which is more favourable. Both get reported.
 - Choosing the Step 4 percentile threshold or the equilibration discard after
   seeing the data they affect.
 - Reporting a pooled-arm headline number (moot: no arm labels exist).

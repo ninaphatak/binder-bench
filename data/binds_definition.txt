@@ -1,0 +1,13 @@
+binds := (result_summary.csv `binding` == "true")
+
+Source: Adaptyv's own call from the Round 2 binding assay, not a leaderboard
+rank. Their method, from the competition README: Bio-Layer Interferometry,
+multi-cycle kinetics against EGFR, antigen flowed at 1000 nM down to 10 nM, in
+duplicate, HBS-T with 0.5% BSA at 25 C. Signals baseline-corrected and fitted
+with a 1:1 binding model per replicate; equilibrium analysis used where the
+maximum signal fell below the quantifiable threshold or kinetics were too fast
+for the instrument.
+
+We take their binary call rather than imposing a KD cutoff of our own, because
+a cutoff we invented would be a threshold tuned by us on an outcome we can see,
+which the hard rules forbid.
