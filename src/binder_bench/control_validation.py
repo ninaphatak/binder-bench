@@ -247,3 +247,95 @@ def assert_control_reproduces_binding_mode(
             "low, which is a separate and expected finding.\n  "
             + "\n  ".join(failures)
         )
+
+
+def contact_residue_pairs(
+    structure_path: Path | str,
+    expected_binder_length: int,
+    *,
+    cutoff: float = 5.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Contacting (binder, target) residue pairs as COMPLEX-relative indices.
+
+    Returned indices index straight into the PAE matrix: binder residue ``i``
+    is PAE row ``i``, target residue ``j`` is PAE row
+    ``expected_binder_length + j``. That mapping holds because AlphaFold writes
+    every residue of the complex in order, binder chain first, with no gaps, so
+    the n-th residue of the file is the n-th row of the PAE.
+
+    This exists for the pre-registered secondary metric S1,
+    ``pae_interface_contacts_mean``: the PAE restricted to pairs that are
+    actually in contact, rather than averaged over every binder-target pair the
+    way Adaptyv's definition does. See ANALYSIS_PLAN.md section 1a.
+
+    Residue ORDER is used, not residue numbering. The structure's own residue
+    numbers are not assumed to start at 1 or to be contiguous; what matters is
+    position within the chain, which is what the PAE is indexed by.
+    """
+    st = parse_structure(structure_path)
+    if len(st.chain_order) < 2:
+        raise ValueError(
+            f"{structure_path} has chains {st.chain_order}; a complex needs two."
+        )
+    binder_chain, target_chain = st.chain_order[0], st.chain_order[1]
+
+    binder_residues = st.residue_ids(binder_chain)
+    target_residues = st.residue_ids(target_chain)
+    if len(binder_residues) != expected_binder_length:
+        raise ValueError(
+            f"{structure_path}: first chain has {len(binder_residues)} residues, "
+            f"expected {expected_binder_length}. Chain order may be flipped."
+        )
+
+    # Position of each atom within its chain's residue ORDER.
+    binder_pos = {key: i for i, key in enumerate(binder_residues)}
+    target_pos = {key: i for i, key in enumerate(target_residues)}
+
+    b_idx, b_xyz, t_idx, t_xyz = [], [], [], []
+    for key, cid, xyz in zip(st.residue_keys, st.chain_ids, st.coords):
+        if cid == binder_chain:
+            b_idx.append(binder_pos[key])
+            b_xyz.append(xyz)
+        elif cid == target_chain:
+            t_idx.append(target_pos[key])
+            t_xyz.append(xyz)
+
+    b_idx = np.asarray(b_idx)
+    t_idx = np.asarray(t_idx)
+    b_xyz = np.asarray(b_xyz)
+    t_xyz = np.asarray(t_xyz)
+
+    # Atom-level distances, reduced to the set of residue pairs in contact.
+    d2 = ((t_xyz[:, None, :] - b_xyz[None, :, :]) ** 2).sum(-1)
+    close = np.argwhere(d2 <= cutoff**2)
+    if close.size == 0:
+        return np.empty(0, dtype=int), np.empty(0, dtype=int)
+
+    pairs = {(int(b_idx[j]), int(t_idx[i])) for i, j in close}
+    binder_out = np.array([p[0] for p in sorted(pairs)], dtype=int)
+    target_out = np.array(
+        [p[1] + expected_binder_length for p in sorted(pairs)], dtype=int
+    )
+    return binder_out, target_out
+
+
+def pae_interface_contacts_mean(
+    pae: np.ndarray,
+    binder_idx: np.ndarray,
+    target_idx: np.ndarray,
+) -> float:
+    """Secondary metric S1: PAE over contacting pairs only, both directions.
+
+    Symmetrised the same way Adaptyv symmetrise theirs, averaging the
+    binder-to-target and target-to-binder blocks, so the only difference from
+    the primary metric is WHICH pairs enter the average.
+
+    Returns NaN when no pair is in contact, which is a real outcome for a
+    design AlphaFold leaves undocked, and must not silently become 0.0: zero
+    would read as perfect confidence.
+    """
+    if binder_idx.size == 0:
+        return float("nan")
+    forward = pae[binder_idx, target_idx]
+    reverse = pae[target_idx, binder_idx]
+    return float((forward.mean() + reverse.mean()) / 2.0)
