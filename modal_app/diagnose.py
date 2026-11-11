@@ -134,6 +134,131 @@ def inspect_image() -> dict:
 
 @app.function(
     image=colabfold_image,
+    volumes={CACHE_DIR: weights},
+    timeout=1800,
+    scaledown_window=2,
+    buffer_containers=0,
+    retries=0,
+    max_containers=1,
+    cpu=4.0,
+)
+def profile_param_load(n_arrays: int = 200) -> dict:
+    """Why is flat_params_to_haiku slow? CPU only, so nearly free.
+
+    Local weights did NOT fix the stall, which rules out the network
+    filesystem as the cause and points at the per-array conversion itself.
+    The original stack showed every jnp.array call going through
+    pjit cache_miss and _run_python_pjit, i.e. compiling a trivial program per
+    array. This measures that directly: how many arrays there are, and what
+    each one costs.
+    """
+    import time
+
+    import numpy as np
+
+    from binder_bench.weights import stage_weights_locally
+
+    out: dict = {}
+
+    # Show the actual source in the image, since the patched copy is what runs.
+    src = Path("/usr/local/lib/python3.12/site-packages/alphafold/model/utils.py")
+    if src.exists():
+        lines = src.read_text().splitlines()
+        snippet = [
+            f"{i + 1}: {lines[i]}"
+            for i in range(max(0, 85), min(len(lines), 125))
+        ]
+        out["utils_source"] = snippet
+        _say("[source] alphafold/model/utils.py 86-125")
+        for line in snippet:
+            _say(f"    {line}")
+
+    local = stage_weights_locally(CACHE_DIR, "/tmp/weights", num_models=5)
+    path = local / "params" / "params_model_3_multimer_v3.npz"
+
+    t0 = time.monotonic()
+    params = np.load(path, allow_pickle=False)
+    keys = list(params.keys())
+    out["n_arrays"] = len(keys)
+    out["npz_open_seconds"] = round(time.monotonic() - t0, 3)
+    _say(f"[params] {len(keys)} arrays, npz opened in {out['npz_open_seconds']}s")
+
+    # Reading every array as numpy, no jax involved.
+    t0 = time.monotonic()
+    total_bytes = 0
+    for k in keys[:n_arrays]:
+        total_bytes += params[k].nbytes
+    numpy_seconds = time.monotonic() - t0
+    out["numpy_read_seconds"] = round(numpy_seconds, 3)
+    out["numpy_read_per_array_ms"] = round(1000 * numpy_seconds / min(n_arrays, len(keys)), 2)
+    _say(
+        f"[params] numpy read {min(n_arrays, len(keys))} arrays "
+        f"({total_bytes / 2**20:.0f} MiB) in {numpy_seconds:.2f}s "
+        f"= {out['numpy_read_per_array_ms']}ms each"
+    )
+
+    # Now the same arrays through jnp.array, which is what the loop does.
+    import jax
+    import jax.numpy as jnp
+
+    out["jax_platform"] = jax.devices()[0].platform
+    arrays = [params[k] for k in keys[:n_arrays]]
+    t0 = time.monotonic()
+    for a in arrays:
+        jnp.array(a)
+    jax_seconds = time.monotonic() - t0
+    out["jnp_array_seconds"] = round(jax_seconds, 3)
+    out["jnp_array_per_array_ms"] = round(1000 * jax_seconds / len(arrays), 2)
+    _say(
+        f"[params] jnp.array on {len(arrays)} arrays in {jax_seconds:.2f}s "
+        f"= {out['jnp_array_per_array_ms']}ms each "
+        f"(platform {out['jax_platform']})"
+    )
+    projected = out["jnp_array_per_array_ms"] * len(keys) / 1000.0
+    out["projected_full_load_seconds"] = round(projected, 1)
+    _say(
+        f"[params] projected for all {len(keys)} arrays: {projected:.0f}s "
+        f"per model, times 5 models = {5 * projected:.0f}s"
+    )
+
+    # And the alternative: one bulk device_put instead of thousands.
+    t0 = time.monotonic()
+    jax.device_put(arrays)
+    bulk_seconds = time.monotonic() - t0
+    out["bulk_device_put_seconds"] = round(bulk_seconds, 3)
+    _say(
+        f"[params] ONE bulk jax.device_put of the same {len(arrays)} arrays: "
+        f"{bulk_seconds:.2f}s"
+    )
+
+    # APPLES TO APPLES. Everything above timed jnp.array on arrays already
+    # materialised into a list, which is NOT what ColabFold does. The real
+    # path calls this exact function, iterating params.items() lazily with
+    # fuse=True. Timing anything else was the mistake that sent me looking at
+    # the network filesystem.
+    from alphafold.model.utils import flat_params_to_haiku
+
+    for to_jnp in (True, False):
+        fresh = np.load(path, allow_pickle=False)
+        t0 = time.monotonic()
+        try:
+            flat_params_to_haiku(fresh, fuse=True, to_jnp=to_jnp)
+            secs = time.monotonic() - t0
+            out[f"flat_params_to_haiku_to_jnp_{to_jnp}_seconds"] = round(secs, 2)
+            _say(
+                f"[params] REAL flat_params_to_haiku(fuse=True, "
+                f"to_jnp={to_jnp}): {secs:.2f}s for one model, "
+                f"so {5 * secs:.0f}s for five"
+            )
+        except Exception as exc:  # noqa: BLE001
+            out[f"flat_params_to_haiku_to_jnp_{to_jnp}_error"] = repr(exc)[:300]
+            _say(f"[params] to_jnp={to_jnp} raised {type(exc).__name__}: {exc}")
+
+    return out
+
+
+@app.function(
+    image=colabfold_image,
     gpu="L4",
     volumes={CACHE_DIR: weights, DATA_DIR: data},
     timeout=DIAGNOSE_TIMEOUT_SEC,
@@ -326,6 +451,27 @@ def diagnose(
         "jobname": colabfold_jobname(design_id),
         "env": interesting,
     }
+
+
+@app.local_entrypoint()
+def profile(n_arrays: int = 200, gpu: str = ""):
+    """Measure the per-array cost of parameter conversion.
+
+    With no gpu it runs on CPU for pennies. The CUDA backend is where the
+    pathology lives, so pass --gpu L4 for the measurement that matters.
+    """
+    import json
+
+    from binder_bench.costs import track_cost
+
+    opts = {"timeout": 1800}
+    if gpu:
+        opts["gpu"] = gpu
+    with track_cost(
+        "profile_param_load", gpu or "cpu", 1, notes=f"param load profile gpu={gpu or 'none'}"
+    ):
+        out = profile_param_load.with_options(**opts).remote(n_arrays)
+    print(json.dumps({k: v for k, v in out.items() if k != "utils_source"}, indent=2))
 
 
 @app.local_entrypoint()
