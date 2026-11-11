@@ -68,6 +68,77 @@ correction and is reported as exploratory.
 Still to specify before Step 3: the exact bootstrap scheme (stratified by
 outcome or not), the AUC tie-handling rule, and the random seed.
 
+## 1a. Pre-specified secondary metrics
+
+AMENDED 2026-11-11, before any metric-versus-outcome relationship was computed
+and before any design's binding status was examined. Nina approved the addition.
+What follows is an addition of secondary metrics only. The primary metric and
+both primary claims above are **unchanged**.
+
+### Why this amendment exists
+
+The 12-design pilot showed `pae_interface_mean` running 16.76 to 26.70 with a
+median of 23.16, and **not one** design below 10, which is the field's
+conventional cutoff for a credible interface. Both positive controls, genuine
+single-digit nM binders, sat inside that same range at 21.75 and 26.51.
+
+The cause is in the metric's definition, not in the pipeline. Adaptyv's
+`pae_interaction` averages over **every** binder-to-target residue pair:
+
+    (pae[:b, b:].mean() + pae[b:, :b].mean()) / 2
+
+With a 621-residue target, the overwhelming majority of those pairs are nowhere
+near the interface, so the mean is dominated by distant residues and scales with
+target size. Two consequences, both load bearing:
+
+1. Our absolute values are **not** comparable to published values computed on
+   smaller constructs, and **no absolute threshold from the literature may be
+   applied to them**. This must not appear in the paper as though the scales
+   matched.
+2. If the primary metric fails, dilution by target size and genuine
+   uninformativeness would be indistinguishable without a sharper variant.
+
+The ranks are unaffected: the target is identical for all 378 designs, so a
+constant offset cannot change AUC, precision-at-k, a decile calibration curve,
+or a Spearman correlation. The primary claims stand as written.
+
+### The two secondary metrics, pre-specified
+
+**S1. `pae_interface_contacts_mean`.** The same PAE matrix, restricted to
+binder-target residue pairs that are **actually in contact**, contact being the
+5.0 Angstrom heavy-atom criterion already used by `geometry.py` and by the
+control gate. Averaged over contacting pairs only, then averaged across the five
+models exactly as the primary is. This removes the target-size dilution while
+changing nothing else about the definition.
+
+**S2. `iptm`.** Mean across the five models, already computed and stored for
+every prediction. It is the other number the field thresholds on, so having it
+pre-registered forecloses a reviewer asking whether the result was specific to
+one metric.
+
+### How they will be used, fixed now
+
+- Both get the **identical** Claim A and Claim B treatment: AUC with a 10,000
+  resample bootstrap CI, precision at top k for k in {10, 20, 50}, decile
+  calibration curve, Spearman against KD among binders with a bootstrap CI.
+- They are reported **alongside** the primary **whatever the outcome**, in one
+  table, with the primary identified as primary. Not reported only if they win.
+- No metric is promoted to primary after the fact. If a secondary discriminates
+  better than the primary, that is stated as a secondary result and as a
+  methodological finding about the metric's definition, never swapped in.
+- Three metrics means three families of tests per claim. Benjamini-Hochberg
+  correction across the metric family, as already specified elsewhere in this
+  plan, applies.
+
+### What would make this amendment illegitimate
+
+It is legitimate only because it was committed before any outcome was examined.
+The 12 pilot designs' `binds` values were deliberately not read; only the
+distribution of the predictions themselves was inspected, which is quality
+control on predictions and uses no outcome data. If any metric-outcome
+relationship had been computed first, this amendment would be a forking path and
+the secondary metrics would carry no inferential weight.
+
 ## 2. Step 3 power, for the record
 
 The detectability floor is set by the number of positives. Hanley-McNeil
