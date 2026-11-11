@@ -24,3 +24,4 @@ timestamp,function_name,gpu_type,gpu_seconds,cpu_seconds,dollars_est,n_inputs,gi
 2026-11-11T06:53:23Z,fold_chunk,L4,1271.588,1271.588,0.282293,2,4b2571bd3bee1a1ca491a60bc02f40b38297ab92,False,False,pilot limit=0
 2026-11-11T08:43:18Z,fold_chunk,L4,6106.572,6106.572,1.355659,14,8e0badb00083ae0bd82a06f0178610be8c923e31,False,False,pilot limit=12
 2026-11-11T08:47:17Z,geometry_chunk,cpu,239.156,239.156,,12,8e0badb00083ae0bd82a06f0178610be8c923e31,True,False,pilot geometry
+2026-11-11T22:31:48Z,diagnose,L40S,100.836,100.836,0.054653,1,54195111c3486954196bad275925635f71b275c1,False,False,control.Human_EGF num_models=1 compile_mode=default max_msa=default cpu=default card-probe-L40S
