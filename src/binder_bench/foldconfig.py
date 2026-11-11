@@ -72,6 +72,37 @@ USE_TEMPLATES = False
 #: The parser asserts that five models were actually produced.
 STOP_AT_SCORE = 100
 
+#: UNIFIED MEMORY OFF. This is the single most expensive setting discovered on
+#: this project. colabfold/batch.py sets, at IMPORT time:
+#:
+#:     ENV = {"TF_FORCE_UNIFIED_MEMORY":"1", "XLA_PYTHON_CLIENT_MEM_FRACTION":"4.0"}
+#:     for k,v in ENV.items():
+#:         if k not in os.environ: os.environ[k] = v
+#:
+#: That asks JAX for FOUR TIMES the card's memory as CUDA managed memory: 92
+#: GiB on a 23 GiB L4, 320 GiB on an H100. Allocations then spill to host RAM
+#: and every access migrates pages across PCIe. The symptom is not an error but
+#: a stall: three cards each sat in jax batched_device_put for over 40 minutes
+#: without producing a single prediction.
+#:
+#: It is a sensible default for Google Colab, where spilling to host RAM lets a
+#: small GPU fold a big complex. It is catastrophic on a container with
+#: bounded RAM, and we do not need it: our complexes run 634 to 871 residues
+#: and fit in 23 GiB natively.
+#:
+#: Belt and braces, because the two mechanisms are independent. The env vars
+#: are pre-set in the child environment, which wins because of ColabFold's
+#: "if k not in os.environ" guard, AND this flag makes ColabFold delete them
+#: itself.
+DISABLE_UNIFIED_MEMORY = True
+
+#: What the child environment must say so ColabFold's import-time guard leaves
+#: it alone. Exported for the runners that spawn colabfold_batch.
+UNIFIED_MEMORY_OFF_ENV = {
+    "TF_FORCE_UNIFIED_MEMORY": "0",
+    "XLA_PYTHON_CLIENT_MEM_FRACTION": "0.9",
+}
+
 #: Deterministic ordering. ColabFold's default is to sort by length, which
 #: reduces JAX recompilation when a batch has mixed lengths. We keep that
 #: default deliberately: within a chunk it is a real saving, and it does not
@@ -94,6 +125,7 @@ class FoldConfig:
     use_templates: bool = USE_TEMPLATES
     stop_at_score: int = STOP_AT_SCORE
     sort_queries_by: str = SORT_QUERIES_BY
+    disable_unified_memory: bool = DISABLE_UNIFIED_MEMORY
 
     def as_record(self) -> dict:
         return asdict(self)
@@ -153,6 +185,11 @@ def build_command(
     # --no-templates to add.
     if cfg.use_templates:
         cmd.append("--templates")
+
+    # See DISABLE_UNIFIED_MEMORY above. Without this, ColabFold asks for 4x the
+    # card's memory and the run stalls indefinitely instead of failing.
+    if cfg.disable_unified_memory:
+        cmd.append("--disable-unified-memory")
 
     # Deliberately NOT passed: --overwrite-existing-results. Its name and its
     # help text contradict each other in 1.6.2, where the help reads "Do not

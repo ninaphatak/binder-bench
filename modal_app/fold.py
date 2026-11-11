@@ -121,7 +121,15 @@ def _run_streamed(
     # progress to stdout would deliver nothing for minutes and then a burst,
     # and would lose the buffer entirely if killed. Streaming the output is
     # pointless if the child decides not to emit it.
-    child_env = dict(os.environ, PYTHONUNBUFFERED="1")
+    # UNIFIED MEMORY OFF, pre-set so ColabFold's import-time
+    # "if k not in os.environ" guard leaves our values alone. Without this it
+    # forces TF_FORCE_UNIFIED_MEMORY=1 and XLA_PYTHON_CLIENT_MEM_FRACTION=4.0,
+    # asking JAX for four times the card's memory; allocations spill to host
+    # RAM and the run stalls for hours instead of failing. See
+    # foldconfig.DISABLE_UNIFIED_MEMORY.
+    from binder_bench.foldconfig import UNIFIED_MEMORY_OFF_ENV
+
+    child_env = dict(os.environ, PYTHONUNBUFFERED="1", **UNIFIED_MEMORY_OFF_ENV)
 
     started = time.monotonic()
     proc = subprocess.Popen(
