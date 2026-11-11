@@ -7,3 +7,4 @@ timestamp,function_name,gpu_type,gpu_seconds,cpu_seconds,dollars_est,n_inputs,gi
 2026-11-11T01:29:48Z,stage.msa,cpu,26.212,26.212,,1,f790bfd4b00d81a3d1e2ffc4a0e70eb612f97afc,True,False,"staging, cpu only"
 2026-11-11T01:30:31Z,stage.verify,cpu,20.693,20.693,,1,f790bfd4b00d81a3d1e2ffc4a0e70eb612f97afc,True,False,"staging, cpu only"
 2026-11-11T01:30:47Z,stage.verify,cpu,7.310,7.310,,1,f790bfd4b00d81a3d1e2ffc4a0e70eb612f97afc,True,False,"staging, cpu only"
+2026-11-11T04:02:25Z,fold_chunk,L4,7642.446,7642.446,1.696623,2,56a3775cd4e0b03ec647e36541190d35b2fc7f76,False,False,pilot limit=0
