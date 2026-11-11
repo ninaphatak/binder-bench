@@ -58,9 +58,18 @@ APP_NAME = "binder-bench"
 #: Raising this needs Nina's approval. SPEC.md lists it as a stop-and-ask.
 PILOT_MAX_CONTAINERS = 4
 
-#: Designs per container. Amortises weight loading and kernel compilation
-#: without making a single failure expensive.
-CHUNK_SIZE = 5
+#: Designs per container, DERIVED FROM MEASUREMENT rather than guessed.
+#:
+#: Measured on an L4 at complex length 674: a steady-state recycle costs 19s,
+#: so a warm four-recycle model costs 76s, and the one-off compile plus warmup
+#: is 69s. Scaled to the design set's median 699-residue complex that is about
+#: 83s per model, so a five-model design costs roughly 7 minutes.
+#:
+#: project_cost.safe_chunk_size(83.2, num_models=5, timeout_sec=7200,
+#: salvage_margin_sec=420, weight_stage_sec=60) returns 12, which keeps a
+#: chunk inside its own deadline with headroom for the longest designs. The
+#: previous value of 5 was a guess made before any timing existed.
+CHUNK_SIZE = 12
 
 #: Explicit. Modal's default of 300s would kill these folds mid-run. Budgeted
 #: generously per chunk: five designs at five models each.
