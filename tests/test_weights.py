@@ -37,12 +37,25 @@ def test_success_marker_is_required_or_colabfold_redownloads():
     assert SUCCESS_MARKERS[MODEL_TYPE] in names
 
 
-def test_only_the_models_actually_used_are_listed():
-    """Copying all five for a one-model run is 1.5 GiB of pointless traffic."""
+def test_all_five_models_are_required_even_for_a_one_model_run():
+    """ColabFold's model_build_order is [3,4,5,1,2] and it loads every one,
+    compiling only model 3 and swapping params into that runner. A one-model
+    run therefore still reads all five files.
+
+    The earlier version of this listed models 1..num_models and failed on a
+    real run with FileNotFoundError for params_model_3_multimer_v3.npz.
+    """
     one = required_files(MODEL_TYPE, 1)
-    assert "params_model_1_multimer_v3.npz" in one
-    assert "params_model_2_multimer_v3.npz" not in one
-    assert len(required_files(MODEL_TYPE, 5)) == 6  # five models plus the marker
+    for n in (1, 2, 3, 4, 5):
+        assert f"params_model_{n}_multimer_v3.npz" in one
+    assert len(one) == 6  # five models plus the marker
+    assert required_files(MODEL_TYPE, 5) == one
+
+
+def test_model_three_is_copied_first():
+    """It is the one ColabFold loads first, so a partial copy fails fast."""
+    names = required_files(MODEL_TYPE, 1)
+    assert names[0] == "params_model_3_multimer_v3.npz"
 
 
 def test_unknown_model_type_raises():
@@ -62,11 +75,9 @@ def test_staging_copies_what_is_needed_and_returns_the_data_dir(tmp_path):
 
     assert local == tmp_path / "local"
     params = local / "params"
-    assert (params / "params_model_1_multimer_v3.npz").exists()
-    assert (params / "params_model_2_multimer_v3.npz").exists()
+    for n in (1, 2, 3, 4, 5):
+        assert (params / f"params_model_{n}_multimer_v3.npz").exists()
     assert (params / SUCCESS_MARKERS[MODEL_TYPE]).exists()
-    # Not requested, so not copied.
-    assert not (params / "params_model_3_multimer_v3.npz").exists()
 
 
 def test_contents_are_copied_faithfully(tmp_path):
