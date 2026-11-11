@@ -46,6 +46,7 @@ ALLOWED_TOP_LEVEL = {
     "json",
     "pathlib",
     "subprocess",
+    "time",
     "dataclasses",
     "typing",
     "numpy",

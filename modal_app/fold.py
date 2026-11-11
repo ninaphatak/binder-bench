@@ -66,6 +66,16 @@ CHUNK_SIZE = 5
 #: generously per chunk: five designs at five models each.
 FOLD_TIMEOUT_SEC = 7200
 
+#: Seconds held back from the container's budget so that when a chunk runs
+#: long we kill ColabFold OURSELVES and still have time to parse, copy and
+#: commit whatever designs did finish.
+#:
+#: The first control run taught this the expensive way. It let Modal's timeout
+#: kill the container, which means the results Volume was never committed, so
+#: two GPU-hours of work vanished and the Volume was still empty afterwards.
+#: A chunk that overruns must degrade to partial results, not to nothing.
+SALVAGE_MARGIN_SEC = 420
+
 #: Seconds a container lingers after its last input.
 SCALEDOWN_WINDOW_SEC = 5
 
@@ -77,6 +87,66 @@ app = modal.App(APP_NAME)
 weights = modal.Volume.from_name("bb-weights", create_if_missing=True)
 data = modal.Volume.from_name("bb-data", create_if_missing=True)
 results = modal.Volume.from_name("bb-results", create_if_missing=True)
+
+
+def _run_streamed(
+    cmd: list[str], deadline_sec: float, tail_lines: int = 300
+) -> tuple[int | None, list[str], float, bool]:
+    """Run a command, printing its output line by line as it arrives.
+
+    Returns ``(returncode, last_lines, elapsed_seconds, hit_deadline)``.
+
+    Deliberately NOT ``subprocess.run(capture_output=True)``. That buffers
+    everything until the process exits, so when the first control run was
+    killed at its timeout, ColabFold's entire progress log was discarded along
+    with the container. Two GPU-hours produced no results AND no diagnosis.
+    A long-running GPU job must narrate itself while it runs.
+
+    A draining thread does the reading so that the main thread can enforce a
+    deadline even if ColabFold stops printing entirely. On deadline we kill the
+    child ourselves, which leaves the caller time to salvage finished work
+    instead of letting Modal kill the container with the Volume uncommitted.
+    """
+    import collections
+    import subprocess
+    import threading
+    import time
+
+    started = time.monotonic()
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    tail: collections.deque[str] = collections.deque(maxlen=tail_lines)
+
+    def drain() -> None:
+        assert proc.stdout is not None
+        for raw in proc.stdout:
+            line = raw.rstrip()
+            tail.append(line)
+            print(f"[cf +{time.monotonic() - started:7.1f}s] {line}", flush=True)
+
+    reader = threading.Thread(target=drain, daemon=True)
+    reader.start()
+
+    hit_deadline = False
+    try:
+        proc.wait(timeout=max(deadline_sec, 1.0))
+    except subprocess.TimeoutExpired:
+        hit_deadline = True
+        print(
+            f"[fold] deadline of {deadline_sec:.0f}s reached; killing "
+            f"colabfold_batch to salvage completed designs",
+            flush=True,
+        )
+        proc.kill()
+        proc.wait()
+
+    reader.join(timeout=15)
+    return proc.returncode, list(tail), time.monotonic() - started, hit_deadline
 
 
 def _fold_record_path(design_id: str) -> Path:
@@ -114,8 +184,6 @@ def fold_chunk(chunk: list[dict]) -> list[dict]:
     Each item of ``chunk`` is ``{"design_id": str, "sequence": str}``.
     """
     import shutil
-    import subprocess
-    import time
 
     from binder_bench.foldconfig import (
         FoldConfig,
@@ -172,39 +240,76 @@ def fold_chunk(chunk: list[dict]) -> list[dict]:
     cmd = build_command(inputs, outputs, CACHE_DIR, config=cfg)
     assert_no_ambiguous_flags(cmd)
 
-    started = time.monotonic()
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    elapsed = time.monotonic() - started
+    print(
+        f"[fold] {len(todo)} designs, complex lengths "
+        f"{sorted(len(it['sequence']) + EXPECTED_LENGTH for it in todo)}",
+        flush=True,
+    )
+    print(f"[fold] {' '.join(cmd)}", flush=True)
 
-    if proc.returncode != 0:
+    # Hold back time to parse and commit. The container's own clock started
+    # before this point, so the deadline is measured against the budget that
+    # remains, not against the full timeout.
+    container_budget = float(os.environ.get("BB_FOLD_TIMEOUT_SEC", FOLD_TIMEOUT_SEC))
+    deadline = max(container_budget - SALVAGE_MARGIN_SEC, 60.0)
+    print(f"[fold] colabfold deadline {deadline:.0f}s of {container_budget:.0f}s", flush=True)
+
+    rc, tail, elapsed, hit_deadline = _run_streamed(cmd, deadline)
+
+    if rc != 0 and not hit_deadline:
         raise RuntimeError(
-            f"colabfold_batch failed with code {proc.returncode} after "
+            f"colabfold_batch failed with code {rc} after "
             f"{elapsed:.0f}s on {len(todo)} designs\n"
             f"--- command ---\n{' '.join(cmd)}\n"
-            f"--- stdout ---\n{proc.stdout[-5000:]}\n"
-            f"--- stderr ---\n{proc.stderr[-5000:]}"
+            f"--- last output ---\n" + "\n".join(tail)
         )
 
+    # Salvage mode. ColabFold writes each query's outputs as it finishes them,
+    # so an overrun chunk usually holds complete results for its earlier
+    # designs. Those are kept; anything short of a full five-model set is
+    # reported as incomplete and left for a re-run rather than averaged over
+    # the wrong number of models.
     out: list[dict] = list(skipped)
-    per_design_seconds = elapsed / len(todo)
+    folded_ids: list[str] = []
 
     for item in todo:
         design_id = item["design_id"]
         jobname = colabfold_jobname(design_id)
         binder_len = len(item["sequence"])
 
-        job = parse_colabfold_output(
-            outputs,
-            jobname,
-            expected_models=cfg.num_models,
-            expected_seeds=cfg.num_seeds,
-        )
+        try:
+            job = parse_colabfold_output(
+                outputs,
+                jobname,
+                expected_models=cfg.num_models,
+                expected_seeds=cfg.num_seeds,
+            )
+        except Exception as exc:
+            if not hit_deadline:
+                raise
+            print(f"[fold] {design_id}: incomplete, {exc}", flush=True)
+            out.append(
+                {
+                    "design_id": design_id,
+                    "status": "incomplete",
+                    "reason": f"chunk hit its deadline: {exc}"[:400],
+                }
+            )
+            continue
+
         if job.n_models != expected_prediction_count(cfg):
-            raise RuntimeError(
+            msg = (
                 f"{design_id}: parsed {job.n_models} predictions, expected "
                 f"{expected_prediction_count(cfg)}. Averaging over the wrong "
                 f"number of models would corrupt the primary estimator."
             )
+            if not hit_deadline:
+                raise RuntimeError(msg)
+            print(f"[fold] {msg}", flush=True)
+            out.append(
+                {"design_id": design_id, "status": "incomplete", "reason": msg[:400]}
+            )
+            continue
 
         # Asserts chain layout per model and fails loudly on a flip.
         records = to_metric_records(job, binder_len)
@@ -234,9 +339,9 @@ def fold_chunk(chunk: list[dict]) -> list[dict]:
             # Provenance. GPU type is recorded because architecture can affect
             # numerics and we want that in the record, not inferred later.
             "gpu_type": gpu_type,
-            "seconds_per_design": round(per_design_seconds, 2),
             "chunk_seconds": round(elapsed, 2),
-            "chunk_size": len(todo),
+            "chunk_n_todo": len(todo),
+            "chunk_hit_deadline": hit_deadline,
             "config": cfg.as_record(),
             **provenance(),
         }
@@ -244,15 +349,41 @@ def fold_chunk(chunk: list[dict]) -> list[dict]:
         path = _fold_record_path(design_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(record, indent=2, default=str))
+
+        # Commit per design, not once at the end. An uncommitted Volume is a
+        # Volume that loses everything if the container is killed, which is
+        # exactly how the first control run lost two GPU-hours.
+        results.commit()
+
+        folded_ids.append(design_id)
         out.append(
             {
                 "design_id": design_id,
                 "status": "folded",
                 "pae_interface_mean": aggregated.get("pae_interface_mean__mean"),
                 "iptm_mean": aggregated.get("iptm__mean"),
-                "seconds": round(per_design_seconds, 2),
                 "gpu_type": gpu_type,
             }
+        )
+
+    # Cost per design is only knowable once we know how many actually finished.
+    # Dividing the chunk's seconds by the designs we ASKED for would understate
+    # the real cost whenever a chunk overruns, which is the one case where the
+    # number matters most.
+    if folded_ids:
+        per_design = elapsed / len(folded_ids)
+        print(
+            f"[fold] {len(folded_ids)}/{len(todo)} folded in {elapsed:.0f}s "
+            f"= {per_design:.0f}s per design on {gpu_type}",
+            flush=True,
+        )
+        for rec in out:
+            if rec.get("status") == "folded":
+                rec["seconds_per_design"] = round(per_design, 1)
+    else:
+        print(
+            f"[fold] 0/{len(todo)} folded in {elapsed:.0f}s on {gpu_type}",
+            flush=True,
         )
 
     results.commit()
