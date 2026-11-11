@@ -59,6 +59,81 @@ def _say(msg: str) -> None:
 
 @app.function(
     image=colabfold_image,
+    volumes={CACHE_DIR: weights},
+    timeout=600,
+    scaledown_window=2,
+    buffer_containers=0,
+    retries=0,
+    max_containers=1,
+    cpu=1.0,
+)
+def inspect_image() -> dict:
+    """What the pinned image actually contains. CPU only, so nearly free.
+
+    Asked because three GPU cards all stalled in the same place and the two
+    remaining explanations both hinge on facts about the image: whether its
+    colabfold_batch accepts --compile-mode, and how much CPU a container
+    really gets. Guessing either would cost another GPU rental.
+    """
+    import subprocess
+
+    out: dict = {}
+
+    help_proc = subprocess.run(
+        ["colabfold_batch", "--help"], capture_output=True, text=True, timeout=300
+    )
+    help_text = help_proc.stdout + help_proc.stderr
+    out["help_rc"] = help_proc.returncode
+    # Only the flags relevant to the stall, to keep the record readable.
+    out["flags_present"] = {
+        flag: (flag in help_text)
+        for flag in (
+            "--compile-mode",
+            "--use-pallas",
+            "--max-msa",
+            "--num-recycle",
+            "--recycle-early-stop-tolerance",
+            "--use-fuse",
+            "--pad-msa",
+        )
+    }
+    _say(f"[help] rc={help_proc.returncode}")
+    for flag, present in out["flags_present"].items():
+        _say(f"    {flag}: {'yes' if present else 'NO'}")
+
+    # The CPU question. os.cpu_count() reports the HOST's cores, which is not
+    # what a cgroup-limited container may use, so read the cgroup quota too.
+    out["os_cpu_count"] = os.cpu_count()
+    try:
+        out["sched_affinity"] = len(os.sched_getaffinity(0))
+    except AttributeError:
+        out["sched_affinity"] = None
+    for path in ("/sys/fs/cgroup/cpu.max", "/sys/fs/cgroup/cpu/cpu.cfs_quota_us"):
+        try:
+            out[path] = Path(path).read_text().strip()
+        except OSError as exc:
+            out[path] = f"unreadable: {type(exc).__name__}"
+    _say(f"[cpu] os.cpu_count={out['os_cpu_count']} affinity={out['sched_affinity']}")
+    _say(f"[cpu] cgroup cpu.max={out['/sys/fs/cgroup/cpu.max']}")
+
+    for mod in ("colabfold", "jax", "jaxlib", "triton", "alphafold"):
+        probe = subprocess.run(
+            [
+                "python",
+                "-c",
+                f"import importlib.metadata as m; print(m.version({mod!r}))",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        out[f"version_{mod}"] = (probe.stdout or probe.stderr).strip()[:120]
+        _say(f"[version] {mod}: {out[f'version_{mod}']}")
+
+    return out
+
+
+@app.function(
+    image=colabfold_image,
     gpu="L4",
     volumes={CACHE_DIR: weights, DATA_DIR: data},
     timeout=DIAGNOSE_TIMEOUT_SEC,
@@ -67,11 +142,25 @@ def _say(msg: str) -> None:
     retries=0,
     max_containers=1,
 )
-def diagnose(design_id: str, sequence: str, num_models: int = 1) -> dict:
+def diagnose(
+    design_id: str,
+    sequence: str,
+    num_models: int = 1,
+    compile_mode: str = "",
+    max_msa: str = "",
+    dump_stacks_every: int = 0,
+) -> dict:
     """Report the GPU environment, then time exactly one model.
 
     Returns a dict rather than printing only, so the measurement survives in
     the local entrypoint's output even if the stream is lost.
+
+    ``compile_mode`` and ``max_msa`` are passed straight through to
+    colabfold_batch so a stall can be attributed to one variable at a time.
+    ``dump_stacks_every``, when nonzero, runs ColabFold under faulthandler so
+    that every N seconds it prints the full Python stack of every thread. That
+    turns a stall from "it hung again" into a named function, which is the
+    difference between one more GPU rental and several.
     """
     from binder_bench.foldconfig import FoldConfig, build_command
     from binder_bench.msa import colabfold_jobname, write_complex_a3m
@@ -153,7 +242,30 @@ def diagnose(design_id: str, sequence: str, num_models: int = 1) -> dict:
 
     cfg = FoldConfig(num_models=num_models)
     cmd = build_command(inputs, outputs, CACHE_DIR, config=cfg)
-    _say(f"[cmd] {' '.join(cmd)}")
+
+    # One variable at a time, appended rather than baked into FoldConfig, so
+    # the frozen configuration stays frozen while the stall is attributed.
+    if compile_mode:
+        cmd += ["--compile-mode", compile_mode]
+    if max_msa:
+        cmd += ["--max-msa", max_msa]
+
+    if dump_stacks_every:
+        # Run ColabFold in-process under faulthandler instead of through its
+        # console script, so periodic stack dumps show where it is stuck.
+        # faulthandler writes to stderr, which is merged into this stream.
+        wrapper = (
+            "import faulthandler, sys\n"
+            f"faulthandler.dump_traceback_later({dump_stacks_every}, "
+            "repeat=True, exit=False)\n"
+            f"sys.argv = {cmd!r}\n"
+            "from colabfold.batch import main\n"
+            "main()\n"
+        )
+        cmd = ["python", "-u", "-c", wrapper]
+        _say(f"[stacks] dumping every {dump_stacks_every}s under faulthandler")
+
+    _say(f"[cmd] {' '.join(cmd) if not dump_stacks_every else 'python -u -c <wrapper>'}")
 
     # STREAMED, not captured. This is the whole point of this module.
     #
@@ -204,11 +316,29 @@ def diagnose(design_id: str, sequence: str, num_models: int = 1) -> dict:
 
 
 @app.local_entrypoint()
+def inspect():
+    """Cheap, CPU-only: report what the pinned image supports."""
+    import json
+
+    from binder_bench.costs import track_cost
+
+    with track_cost("inspect_image", "cpu", 1, notes="image capability probe"):
+        out = inspect_image.remote()
+    print(json.dumps(out, indent=2), flush=True)
+
+
+@app.local_entrypoint()
 def main(
     gpu: str = "L4",
     control: str = "control.Human_EGF",
     num_models: int = 1,
     designs_parquet: str = "data/designs.parquet",
+    compile_mode: str = "",
+    max_msa: str = "",
+    cpu: float = 0.0,
+    dump_stacks_every: int = 0,
+    timeout: int = DIAGNOSE_TIMEOUT_SEC,
+    label: str = "",
 ):
     """Time one model of one control on one card.
 
@@ -233,12 +363,19 @@ def main(
 
     # Tracked like any other GPU rental. A diagnostic that is not in costs.csv
     # is money that left the budget without appearing in the record.
-    with track_cost(
-        "diagnose", gpu, 1, notes=f"{control} num_models={num_models}"
-    ):
-        out = diagnose.with_options(
-            gpu=gpu, timeout=DIAGNOSE_TIMEOUT_SEC, retries=0
-        ).remote(control, seq, num_models)
+    opts = dict(gpu=gpu, timeout=timeout, retries=0)
+    if cpu:
+        opts["cpu"] = cpu
+    note = (
+        f"{control} num_models={num_models} compile_mode={compile_mode or 'default'} "
+        f"max_msa={max_msa or 'default'} cpu={cpu or 'default'} {label}"
+    )
+    print(f"[diagnose] {note}", flush=True)
+
+    with track_cost("diagnose", gpu, 1, notes=note):
+        out = diagnose.with_options(**opts).remote(
+            control, seq, num_models, compile_mode, max_msa, dump_stacks_every
+        )
 
     print(json.dumps(out, indent=2), flush=True)
     sys.stdout.flush()
