@@ -36,3 +36,6 @@ venv/
 
 # os
 .DS_Store
+
+# scratch
+data/*.zip
