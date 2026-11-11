@@ -21,3 +21,4 @@ timestamp,function_name,gpu_type,gpu_seconds,cpu_seconds,dollars_est,n_inputs,gi
 2026-11-11T06:13:08Z,profile_param_load,L4,417.256,417.256,0.092631,1,e657fc5ae5bf2ba36e6e379bd24e8ca823cf4e72,True,False,param load profile gpu=L4
 2026-11-11T06:26:06Z,diagnose,L4,740.632,740.632,0.164420,1,092a0a2274e1ea2ec7ec699d601865e6cc11fdd1,False,False,control.Human_EGF num_models=1 compile_mode=default max_msa=default cpu=8.0 fix3-cpu8-local-weights
 2026-11-11T06:30:25Z,diagnose,L4,176.208,176.208,0.039118,1,1a1eb600325d9d111ef87ba6a4afeb439e81860e,False,False,control.Human_EGF num_models=1 compile_mode=default max_msa=default cpu=default fix4-no-unified-memory
+2026-11-11T06:53:23Z,fold_chunk,L4,1271.588,1271.588,0.282293,2,4b2571bd3bee1a1ca491a60bc02f40b38297ab92,False,False,pilot limit=0
