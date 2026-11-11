@@ -141,6 +141,28 @@ def spend_to_date(path: Path = Path("costs.csv")) -> float:
 BUDGET_USD = float(os.environ.get("BINDER_BENCH_BUDGET_USD", "260"))
 
 
+def worst_case_usd(gpu_type: str, n_containers: int, timeout_sec: float) -> float:
+    """What a run costs if EVERY container runs to its full timeout.
+
+    The ceiling, not the estimate. Used before launching, because the honest
+    question is not "what should this cost" but "what is the most this can
+    cost if it goes as badly as last time". The first control run went exactly
+    that way: both containers ran the full 7200s and produced nothing.
+
+    Raises on an unknown card rather than assuming a price, since silently
+    assuming a cheap rate for an expensive card is the one error here that
+    costs money.
+    """
+    rate = GPU_RATES_USD_PER_SEC.get(gpu_type)
+    if rate is None:
+        raise ValueError(
+            f"No rate known for GPU {gpu_type!r}. Known: "
+            f"{sorted(GPU_RATES_USD_PER_SEC)}. Refusing to project a cost from "
+            f"a guessed price."
+        )
+    return rate * timeout_sec * n_containers
+
+
 def assert_within_budget(projected_usd: float, path: Path = Path("costs.csv")) -> None:
     """Refuse to launch a run that would take the project past its budget.
 

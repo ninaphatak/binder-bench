@@ -100,3 +100,25 @@ def test_salvage_margin_leaves_real_time_to_commit(fold):
     """A margin too small to parse and copy in is no margin at all."""
     assert fold.SALVAGE_MARGIN_SEC >= 300
     assert fold.SALVAGE_MARGIN_SEC < fold.FOLD_TIMEOUT_SEC / 2
+
+
+def test_child_is_unbuffered_so_progress_actually_arrives(fold):
+    """A child that block-buffers stdout defeats the whole streaming fix.
+
+    This asserts the environment is set rather than timing a race: the child
+    reports whether PYTHONUNBUFFERED reached it.
+    """
+    rc, tail, elapsed, hit = fold._run_streamed(
+        ["sh", "-c", 'echo "unbuffered=$PYTHONUNBUFFERED"'], deadline_sec=30
+    )
+    assert rc == 0
+    assert tail == ["unbuffered=1"]
+
+
+def test_child_inherits_the_rest_of_the_environment(fold):
+    """Overriding the env must not wipe PATH and leave colabfold_batch unfound."""
+    rc, tail, elapsed, hit = fold._run_streamed(
+        ["sh", "-c", 'test -n "$PATH" && echo path-present'], deadline_sec=30
+    )
+    assert rc == 0
+    assert "path-present" in tail
