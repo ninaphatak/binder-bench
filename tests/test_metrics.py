@@ -84,22 +84,72 @@ def test_plddt_length_mismatch_is_rejected():
 def test_primary_estimator_is_the_mean_not_the_best():
     """The headline number must be the mean across models, not best-of-five."""
     per_model = [
-        {"pae_interface_mean": 10.0, "iptm": 0.90},
-        {"pae_interface_mean": 20.0, "iptm": 0.50},
-        {"pae_interface_mean": 30.0, "iptm": 0.40},
+        {"pae_interface_mean": 10.0, "iptm": 0.90, "rank": 1, "model_number": 3},
+        {"pae_interface_mean": 20.0, "iptm": 0.50, "rank": 2, "model_number": 1},
+        {"pae_interface_mean": 30.0, "iptm": 0.40, "rank": 3, "model_number": 5},
     ]
     out = aggregate_across_models(per_model)
     assert out["pae_interface_mean__mean"] == pytest.approx(20.0)
-    # rank_001 is the highest-ipTM model, which here is the optimistic one.
     assert out["pae_interface_mean__rank001"] == pytest.approx(10.0)
-    # And the two must not be confused: the optimistic value is strictly better
+    # The two must not be confused: the optimistic value is strictly better
     # than the mean, which is the whole reason we do not use it as primary.
     assert out["pae_interface_mean__rank001"] < out["pae_interface_mean__mean"]
+    assert out["rank001_model_number"] == 3
     assert out["n_models"] == 3
 
 
+def test_rank001_is_taken_from_the_real_rank_not_inferred_from_iptm():
+    """ColabFold ranks on a weighted ipTM/pTM confidence, not ipTM alone.
+
+    Here the highest-ipTM model is NOT the one ColabFold ranked first. The old
+    implementation inferred rank_001 as max ipTM and would have reported 10.0.
+    """
+    per_model = [
+        {"pae_interface_mean": 10.0, "iptm": 0.91, "ptm": 0.10, "rank": 2},
+        {"pae_interface_mean": 25.0, "iptm": 0.90, "ptm": 0.80, "rank": 1},
+    ]
+    out = aggregate_across_models(per_model)
+    assert out["pae_interface_mean__rank001"] == pytest.approx(25.0)
+    assert out["iptm__rank001"] == pytest.approx(0.90)
+
+
+def test_duplicate_rank_one_is_rejected():
+    """Two rank-1 records means two runs got mixed in one directory."""
+    per_model = [
+        {"pae_interface_mean": 10.0, "iptm": 0.9, "rank": 1},
+        {"pae_interface_mean": 12.0, "iptm": 0.8, "rank": 1},
+    ]
+    with pytest.raises(ValueError, match="claim rank 1"):
+        aggregate_across_models(per_model)
+
+
+def test_ranks_present_but_no_rank_one_is_rejected():
+    """A run that died before reranking must not yield a comparability value."""
+    per_model = [
+        {"pae_interface_mean": 10.0, "iptm": 0.9, "rank": 2},
+        {"pae_interface_mean": 12.0, "iptm": 0.8, "rank": 3},
+    ]
+    with pytest.raises(ValueError, match="none is rank 1"):
+        aggregate_across_models(per_model)
+
+
+def test_rank001_keys_absent_when_no_rank_information_exists():
+    """A missing key beats a guessed one; the mean does not need the rank."""
+    per_model = [
+        {"pae_interface_mean": 10.0, "iptm": 0.9},
+        {"pae_interface_mean": 20.0, "iptm": 0.5},
+    ]
+    out = aggregate_across_models(per_model)
+    assert out["pae_interface_mean__mean"] == pytest.approx(15.0)
+    assert "pae_interface_mean__rank001" not in out
+    assert "iptm__rank001" not in out
+
+
 def test_ensemble_spread_is_recorded():
-    per_model = [{"pae_interface_mean": v, "iptm": 0.5} for v in (10.0, 12.0, 14.0)]
+    per_model = [
+        {"pae_interface_mean": v, "iptm": 0.5, "rank": i + 1}
+        for i, v in enumerate((10.0, 12.0, 14.0))
+    ]
     out = aggregate_across_models(per_model)
     assert out["pae_interface_mean__sd"] == pytest.approx(2.0)
     assert out["pae_interface_mean__min"] == pytest.approx(10.0)
@@ -107,7 +157,9 @@ def test_ensemble_spread_is_recorded():
 
 
 def test_single_model_spread_is_zero_not_nan():
-    out = aggregate_across_models([{"pae_interface_mean": 11.0, "iptm": 0.7}])
+    out = aggregate_across_models(
+        [{"pae_interface_mean": 11.0, "iptm": 0.7, "rank": 1}]
+    )
     assert out["pae_interface_mean__sd"] == 0.0
 
 
