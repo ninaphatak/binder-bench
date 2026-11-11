@@ -116,6 +116,34 @@ every prediction. It is the other number the field thresholds on, so having it
 pre-registered forecloses a reviewer asking whether the result was specific to
 one metric.
 
+**S3. `ipsae`.** ADDED 2026-11-11 on Nina's instruction, still before any
+outcome was examined.
+
+The published fix for exactly the defect S1 was invented to work around.
+Dunbrack, *Rēs ipSAE loquuntur: What's wrong with AlphaFold's ipTM score and
+how to fix it* (bioRxiv 2025.02.10.637595), shows that ipTM depends on the size
+of the chain pair, so different constructs give different scores for the same
+interface. ipSAE restricts the calculation to residue pairs whose interchain
+PAE passes a cutoff, and recomputes the `d0` normalisation from the count of
+residues that pass rather than from total chain length.
+
+Two reasons it belongs here. It is the field's own answer to the target-size
+dilution we measured, so omitting it leaves the obvious reviewer question
+unanswered. And a BindCraft community guide already recommends ranking designs
+by ipSAE over ipTM, so it is not merely a methods paper, it is in use.
+
+Implementation commitment, fixed now: the **reference implementation** from the
+Dunbrack Lab repository is used, not a reimplementation of ours, so what gets
+reported is the published metric rather than our reading of it. Any deviation
+forced by input format is documented in `DECISIONS.md`. Cutoffs are the
+reference defaults; if the defaults are ambiguous, the value chosen is recorded
+before computation, never selected by comparing outcomes.
+
+S3 is computed **after** the fold, from the saved PAE matrices and structures.
+It needs no GPU time and no re-folding. Our own S1 is retained alongside it,
+and if the two disagree that is reported rather than resolved in favour of
+whichever looks better.
+
 ### How they will be used, fixed now
 
 - Both get the **identical** Claim A and Claim B treatment: AUC with a 10,000
@@ -126,7 +154,7 @@ one metric.
 - No metric is promoted to primary after the fact. If a secondary discriminates
   better than the primary, that is stated as a secondary result and as a
   methodological finding about the metric's definition, never swapped in.
-- Three metrics means three families of tests per claim. Benjamini-Hochberg
+- Four metrics means four families of tests per claim. Benjamini-Hochberg
   correction across the metric family, as already specified elsewhere in this
   plan, applies.
 
