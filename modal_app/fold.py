@@ -58,22 +58,24 @@ APP_NAME = "binder-bench"
 #: Raising this needs Nina's approval. SPEC.md lists it as a stop-and-ask.
 PILOT_MAX_CONTAINERS = 4
 
-#: Designs per container, DERIVED FROM MEASUREMENT rather than guessed.
+#: Designs per container, DERIVED FROM MEASUREMENT rather than guessed, and
+#: sized for the L40S the run actually uses.
 #:
-#: Measured over 44 pilot models on an L4: 107.4s per model on average
-#: (median 91.5, max 198.5) across the real design-length distribution, so a
-#: five-model design costs about 537s. The controls alone suggested 83s per
-#: model, which was optimistic because control.Human_EGF at 674 residues sits
-#: near the 10th percentile of complex length while the design median is 699
-#: and the maximum 871.
+#: Modal had NO L4 capacity when the full run was launched: the job sat queued
+#: for 39 minutes with the scheduler reporting "waiting to be scheduled on a
+#: GPU_L4 worker". The L40S had capacity and is 2.5x faster (one model of the
+#: 674-residue control in 79.6s against 145s, steady-state recycles about 7.5s
+#: against 19s) at 2.44x the price per second, so cost per design is
+#: effectively identical: $43 against $45 for all 378, while wall clock drops
+#: from 56 to 22 GPU-hours. All designs run on ONE card type, as SPEC requires;
+#: the switch was free because every fold record had been cleared first.
 #:
-#: project_cost.safe_chunk_size(107.4, num_models=5, timeout_sec=7200,
-#: salvage_margin_sec=420, weight_stage_sec=60) returns 9, giving about 4833s
-#: of folding against a deadline near 6720s. At the earlier value of 12 a chunk
-#: would have needed roughly 6450s and would have grazed or crossed the
-#: deadline on nearly every chunk, salvaging partial results each time and
-#: spending the margin instead of holding it in reserve.
-CHUNK_SIZE = 9
+#: Sized against a rate 50% WORSE than measured (63.6s rather than 42.4s per
+#: model), because the L40S figure comes from a single model on the shortest
+#: control while the design set reaches 871 residues. safe_chunk_size at that
+#: pessimistic rate gives 15, needing about 4770s against a deadline near
+#: 6720s. If the true rate matches the estimate, a chunk simply finishes early.
+CHUNK_SIZE = 15
 
 #: Explicit. Modal's default of 300s would kill these folds mid-run. Budgeted
 #: generously per chunk: five designs at five models each.
