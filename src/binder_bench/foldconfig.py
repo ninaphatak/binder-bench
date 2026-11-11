@@ -72,6 +72,27 @@ USE_TEMPLATES = False
 #: The parser asserts that five models were actually produced.
 STOP_AT_SCORE = 100
 
+#: Recycle early stopping, made EXPLICIT rather than left implicit.
+#:
+#: ColabFold's --recycle-early-stop-tolerance defaults to None at the CLI,
+#: which does not mean "off": it means the model config's own default applies,
+#: and for AlphaFold2-multimer that is 0.5 Angstrom. Recycling therefore stops
+#: once the change between recycles falls below that, so designs get DIFFERENT
+#: numbers of recycles. The pilot log shows models reporting "(2 recycles)" and
+#: "(3 recycles)" side by side.
+#:
+#: Kept at AF2-multimer's own default of 0.5 rather than forced to 0, because
+#: the metric under study is the one practitioners compute, and they compute it
+#: with this default active. But it is written down here, so the provenance
+#: record states it instead of inheriting it silently from a library.
+#:
+#: CONSEQUENCE TO CHECK IN STEP 3: recycle count varies per design, and more
+#: recycles can change a confidence score. The count is recoverable from
+#: ColabFold's own log.txt, which fold_chunk now saves alongside the results,
+#: so the analysis can test whether recycle count confounds the metric rather
+#: than assuming it does not.
+RECYCLE_EARLY_STOP_TOLERANCE = 0.5
+
 #: UNIFIED MEMORY OFF. This is the single most expensive setting discovered on
 #: this project. colabfold/batch.py sets, at IMPORT time:
 #:
@@ -126,6 +147,7 @@ class FoldConfig:
     stop_at_score: int = STOP_AT_SCORE
     sort_queries_by: str = SORT_QUERIES_BY
     disable_unified_memory: bool = DISABLE_UNIFIED_MEMORY
+    recycle_early_stop_tolerance: float = RECYCLE_EARLY_STOP_TOLERANCE
 
     def as_record(self) -> dict:
         return asdict(self)
@@ -164,6 +186,9 @@ def build_command(
         str(cfg.num_models),
         "--num-recycle",
         str(cfg.num_recycle),
+        # Explicit, not inherited. See RECYCLE_EARLY_STOP_TOLERANCE.
+        "--recycle-early-stop-tolerance",
+        str(cfg.recycle_early_stop_tolerance),
         "--num-seeds",
         str(cfg.num_seeds),
         "--random-seed",
