@@ -14,3 +14,4 @@ timestamp,function_name,gpu_type,gpu_seconds,cpu_seconds,dollars_est,n_inputs,gi
 2026-11-11T05:23:26Z,inspect_image,cpu,7.105,7.105,,1,71f5408ecce58725182e325d0d58951ac3f01c83,True,False,image capability probe
 2026-11-11T05:34:15Z,diagnose,L4,563.921,563.921,0.125191,1,16c35aaa67d39ea792a331642bee6a9ea22ff0f6,True,False,control.Human_EGF num_models=1 compile_mode=fast max_msa=default cpu=default arm-A-compile-fast
 2026-11-11T05:34:16Z,diagnose,L4,560.502,560.502,0.124432,1,16c35aaa67d39ea792a331642bee6a9ea22ff0f6,True,False,control.Human_EGF num_models=1 compile_mode=default max_msa=default cpu=8.0 arm-B-cpu8
+2026-11-11T05:49:30Z,diagnose,L4,895.692,895.692,0.198844,1,50e7a5d7af302599677e18929bb158a658cc8f3a,True,False,control.Human_EGF num_models=1 compile_mode=default max_msa=default cpu=default fix-local-weights

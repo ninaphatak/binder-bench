@@ -116,3 +116,47 @@ def test_length_scaling_refuses_a_large_extrapolation():
 def test_length_scaling_rejects_nonsense_lengths():
     with pytest.raises(ValueError, match="positive"):
         scale_to_length(100.0, 0, 699)
+
+
+def test_chunk_size_comes_from_the_measured_rate():
+    """At 60s per model and 5 models, a design costs 300s. With 7200-420
+    timeout, 0.75 safety and 120s staging, usable is about 4965s, so 16."""
+    from binder_bench.project_cost import safe_chunk_size
+
+    n = safe_chunk_size(
+        60.0, num_models=5, timeout_sec=7200, salvage_margin_sec=420,
+        weight_stage_sec=120.0,
+    )
+    assert n == 16
+
+
+def test_a_slow_card_forces_chunks_of_one_rather_than_overrunning():
+    """The failure the first fold run would have had: CHUNK_SIZE=5 when even
+    one design does not fit."""
+    from binder_bench.project_cost import safe_chunk_size
+
+    assert (
+        safe_chunk_size(
+            600.0, num_models=5, timeout_sec=7200, salvage_margin_sec=420,
+            weight_stage_sec=120.0,
+        )
+        == 1
+    )
+
+
+def test_chunk_size_never_returns_zero():
+    from binder_bench.project_cost import safe_chunk_size
+
+    assert (
+        safe_chunk_size(
+            99999.0, num_models=5, timeout_sec=7200, salvage_margin_sec=420
+        )
+        == 1
+    )
+
+
+def test_impossible_timeout_is_rejected():
+    from binder_bench.project_cost import safe_chunk_size
+
+    with pytest.raises(ValueError, match="no time remains"):
+        safe_chunk_size(60.0, timeout_sec=400, salvage_margin_sec=420)

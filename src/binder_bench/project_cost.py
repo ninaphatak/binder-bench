@@ -155,3 +155,42 @@ def compare_cards(
         for gpu, secs in seconds_per_model_by_gpu.items()
     ]
     return sorted(out, key=lambda p: p.per_design_usd)
+
+
+def safe_chunk_size(
+    seconds_per_model: float,
+    *,
+    num_models: int = 5,
+    timeout_sec: float,
+    salvage_margin_sec: float,
+    weight_stage_sec: float = 120.0,
+    safety: float = 0.75,
+) -> int:
+    """Largest chunk that should finish inside its own deadline.
+
+    A chunk sized by guesswork rather than by measurement either wastes the
+    amortisation that chunking exists for, or overruns its deadline on every
+    single chunk and salvages partial results every time. The first fold run
+    used CHUNK_SIZE=5 against a 7200s timeout without knowing the per-model
+    cost, which at a realistic rate could not have fitted.
+
+    ``safety`` leaves headroom because designs differ in length by up to 237
+    residues, so the slowest design in a chunk costs meaningfully more than
+    the median one, and it is the slowest that decides whether the chunk fits.
+
+    Returns at least 1: a chunk of one design that overruns is a problem to
+    solve by raising the timeout, not by chunking less.
+    """
+    if seconds_per_model <= 0:
+        raise ValueError("seconds_per_model must be positive")
+    if timeout_sec <= salvage_margin_sec:
+        raise ValueError(
+            f"timeout {timeout_sec}s does not exceed salvage margin "
+            f"{salvage_margin_sec}s, so no time remains to fold anything"
+        )
+
+    usable = (timeout_sec - salvage_margin_sec) * safety - weight_stage_sec
+    per_design = seconds_per_model * num_models
+    if usable <= per_design:
+        return 1
+    return max(1, int(usable // per_design))
