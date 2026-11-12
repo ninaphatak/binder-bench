@@ -73,6 +73,56 @@ def estimate_dollars(gpu_type: str, gpu_seconds: float) -> float | None:
     return rate * gpu_seconds
 
 
+def log_measured_cost(
+    function_name: str,
+    gpu_type: str,
+    gpu_seconds: float,
+    n_inputs: int,
+    *,
+    produces_results: bool = False,
+    notes: str = "",
+    path: Path = Path("costs.csv"),
+) -> float:
+    """Write a ledger row from MEASURED container-seconds.
+
+    ``track_cost`` times the local client, which equals GPU-seconds only when
+    exactly one container runs. The first full fold ran four in parallel and
+    track_cost recorded $10.21 against a true $38.43, understating by 3.77x.
+    A budget guard fed that number would let a parallel run consume four times
+    its apparent allowance.
+
+    So any function that fans out must sum the container-seconds its workers
+    actually report and log them here instead.
+    """
+    dollars = estimate_dollars(gpu_type, gpu_seconds)
+    sha, dirty = git_provenance()
+    row = {
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "function_name": function_name,
+        "gpu_type": gpu_type,
+        "gpu_seconds": f"{gpu_seconds:.3f}",
+        "cpu_seconds": "",
+        "dollars_est": f"{dollars:.6f}" if dollars is not None else "",
+        "n_inputs": n_inputs,
+        "git_sha": sha,
+        "git_dirty": dirty,
+        "produces_results": produces_results,
+        "notes": notes,
+    }
+    new = not path.exists()
+    with path.open("a", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=FIELDS)
+        if new:
+            w.writeheader()
+        w.writerow(row)
+    print(
+        f"[cost] MEASURED {function_name} gpu={gpu_type} "
+        f"gpu_seconds={gpu_seconds:.0f} n={n_inputs} "
+        f"est=${row['dollars_est'] or '?'}"
+    )
+    return dollars or 0.0
+
+
 @contextmanager
 def track_cost(
     function_name: str,
@@ -84,6 +134,12 @@ def track_cost(
     path: Path = Path("costs.csv"),
 ):
     """Wrap a .remote() or .map() call in the LOCAL entrypoint, not remotely.
+
+    WARNING: this records LOCAL WALL TIME, which equals GPU-seconds only for a
+    single container. For a fanned-out .map() it UNDERSTATES cost by roughly
+    the number of parallel containers; the first full fold understated by
+    3.77x. Use log_measured_cost with summed container-seconds for those, and
+    treat this row as wall-clock context only.
 
     It has to be local: code inside a Modal function runs in the container, and
     a file written there is discarded when the container exits. The alternative

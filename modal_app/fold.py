@@ -624,6 +624,7 @@ def main(
 
     from binder_bench.costs import (
         assert_within_budget,
+        log_measured_cost,
         spend_to_date,
         track_cost,
         worst_case_usd,
@@ -667,9 +668,42 @@ def main(
     )
 
     records: list[dict] = []
-    with track_cost("fold_chunk", gpu, len(items), notes=f"pilot limit={limit}"):
+    with track_cost(
+        "fold_chunk", gpu, len(items), notes=f"wall-clock context, limit={limit}"
+    ):
         for batch in fn.map(chunks):
             records.extend(batch)
+
+    # AUTHORITATIVE cost row, from container-seconds the workers reported.
+    # track_cost above times the LOCAL client, which equals GPU-seconds only
+    # when one container runs. With max_containers=4 it understated the first
+    # full fold by 3.77x, $10.21 against a true $38.43. A budget guard fed the
+    # wall-clock number would let a parallel run spend four times its apparent
+    # allowance, so the measured number is logged separately.
+    chunk_seconds = {
+        r["colabfold_jobname"]: r["chunk_seconds"]
+        for r in records
+        if "chunk_seconds" in r and "colabfold_jobname" in r
+    }
+    if not chunk_seconds:
+        # Summary dicts do not carry chunk_seconds; fall back to the records on
+        # the Volume being the record of truth and say so rather than guessing.
+        print(
+            "[cost] WARNING: no chunk_seconds in returned summaries, so the "
+            "authoritative GPU-seconds could not be logged. Sum "
+            "chunk_seconds across results/folds/*.json instead.",
+            flush=True,
+        )
+    else:
+        total = float(sum(set(chunk_seconds.values())))
+        log_measured_cost(
+            "fold_chunk",
+            gpu,
+            total,
+            len(items),
+            produces_results=True,
+            notes="measured container-seconds, summed over distinct chunks",
+        )
 
     print(json.dumps(records, indent=2)[:4000])
 
