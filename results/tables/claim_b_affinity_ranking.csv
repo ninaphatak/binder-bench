@@ -1,0 +1,9 @@
+metric,role,population,n,spearman,ci_low,ci_high,ci_excludes_zero,fisher_z_p,n_bootstrap,bh_significant
+pae_interface_mean,primary,uncensored_binders_primary,44,-0.1577,-0.4489,0.1614,False,0.308497,10000,False
+pae_interface_mean,primary,all_binders_secondary,53,0.0031,-0.3034,0.3175,False,0.982672,10000,False
+pae_interface_contacts_mean,secondary_S1,uncensored_binders_primary,44,-0.0803,-0.3831,0.2469,False,0.606185,10000,False
+pae_interface_contacts_mean,secondary_S1,all_binders_secondary,53,0.0099,-0.2827,0.3245,False,0.943954,10000,False
+iptm,secondary_S2,uncensored_binders_primary,44,0.1104,-0.2261,0.4093,False,0.47793,10000,False
+iptm,secondary_S2,all_binders_secondary,53,-0.0059,-0.3284,0.2976,False,0.966486,10000,False
+ipsae,secondary_S3,uncensored_binders_primary,44,-0.0121,-0.3404,0.3056,False,0.938416,10000,False
+ipsae,secondary_S3,all_binders_secondary,53,-0.0575,-0.3752,0.2456,False,0.683841,10000,False
