@@ -87,7 +87,13 @@ def ipsae_chunk(jobnames: list[str]) -> list[dict]:
             continue
 
         record = json.loads(record_path.read_text())
-        if "ipsae" in record.get("secondary_metrics", {}):
+        cached = record.get("secondary_metrics", {}).get("ipsae")
+        # Require the FULL five models before treating a result as done. The
+        # first pass produced 13 designs averaged over 1, 3 or 4 models, which
+        # is not the pre-registered estimator, and a cache keyed only on
+        # presence would have frozen those in place.
+        n_expected = len(record.get("structures", []))
+        if cached and n_expected and cached.get("ipsae__n_models") == n_expected:
             out.append({"jobname": jobname, "status": "cached"})
             continue
 
@@ -98,13 +104,47 @@ def ipsae_chunk(jobnames: list[str]) -> list[dict]:
 
         per_model: dict[str, dict] = {}
         failures: list[str] = []
+
+        # Resolve structures from the RECORD, never by globbing the directory.
+        #
+        # Globbing failed on 4 of 380 designs and the reason matters. The 14
+        # pilot and control designs were re-folded after their records were
+        # cleared, but their STRUCTURES were not deleted. ColabFold names a
+        # structure after its rank, and rank is not stable across runs (the
+        # same model moved between rank_004 and rank_005), so the second run's
+        # files did not overwrite the first's and the directory held 10 files
+        # for 5 models. A glob for "*model_1_seed_000*" then matched two.
+        #
+        # record["structures"] lists exactly the files this fold produced, so
+        # it is authoritative. The glob was convenience that quietly depended
+        # on the directory being clean.
+        declared = list(record.get("structures", []))
+
+        # SECOND HAZARD, worse than the first. A design_id may itself CONTAIN
+        # a ColabFold filename: several entrants named designs things like
+        #   ..._unrelaxed_rank_001_alphafold2_multimer_v3_model_1_seed_000_top1_...
+        # so the substring "model_1_seed_000" appears in the design_id portion
+        # of EVERY one of that design's five filenames. A naive substring test
+        # then matches all five and exactly one model is lost per design, which
+        # is how six designs silently averaged four models instead of five.
+        #
+        # So the jobname prefix is stripped first and the model id is matched
+        # only in the suffix ColabFold appends, where it occurs exactly once.
+        def _suffix(name: str) -> str:
+            return name[len(jobname):] if name.startswith(jobname) else name
+
         for model_id in model_ids:
-            # Match the structure file for this model id, e.g. model_3_seed_000.
-            matches = sorted(struct_dir.glob(f"*{model_id}*.pdb"))
+            matches = [
+                struct_dir / n for n in declared if model_id in _suffix(n)
+            ]
             if len(matches) != 1:
                 failures.append(
-                    f"{model_id}: {len(matches)} structures matched"
+                    f"{model_id}: {len(matches)} declared structures matched "
+                    f"after stripping the jobname prefix"
                 )
+                continue
+            if not matches[0].exists():
+                failures.append(f"{model_id}: {matches[0].name} is missing")
                 continue
             try:
                 res = ipsae_runner.compute_ipsae(matches[0], paes[model_id])
@@ -191,6 +231,22 @@ def main(limit: int = 0):
         by_status[r["status"]] = by_status.get(r["status"], 0) + 1
     print(f"[ipsae] {by_status}", flush=True)
 
+    # Print WHY anything failed. The first run reported only the counts, which
+    # meant four failures had to be diagnosed by re-downloading every record.
+    for r in records:
+        if r["status"] in ("failed", "no_pae_saved", "no_fold_record"):
+            print(
+                f"[ipsae] {r['status']}: {r['jobname']} "
+                f"{r.get('reasons', '')}",
+                flush=True,
+            )
+        elif r.get("n_failed_models"):
+            print(
+                f"[ipsae] partial: {r['jobname']} "
+                f"{r['n_failed_models']} of its models failed",
+                flush=True,
+            )
+
     done = [r for r in records if r["status"] == "computed"]
     if done:
         vals = sorted(r["ipsae__mean"] for r in done)
@@ -225,3 +281,71 @@ def _volume_listing(subdir: str) -> list[Path]:
         for tok in proc.stdout.split()
         if tok.startswith(f"{subdir}/")
     ]
+
+
+@app.function(
+    image=cpu_image,
+    volumes={RESULTS_DIR: results},
+    timeout=1800,
+    scaledown_window=5,
+    buffer_containers=0,
+    retries=0,
+    max_containers=1,
+    cpu=1.0,
+)
+def prune_stale_structures(dry_run: bool = True) -> dict:
+    """Delete structure files that no fold record declares.
+
+    Needed because clearing the fold records before the full re-fold did NOT
+    clear the structures, and ColabFold names a structure after its rank,
+    which is not stable across runs. So a re-folded design can end up holding
+    both runs' files, 10 for 5 models, with no way to tell them apart by name.
+
+    This matters beyond the ipSAE lookup it already broke: Step 4 starts its
+    MD from these structures, and a stale file from a superseded fold would be
+    simulated as though it were current.
+
+    ``record["structures"]`` is the authoritative list, written by the same
+    loop that copied the files.
+    """
+    removed: list[str] = []
+    kept = 0
+    scanned = 0
+    folds_dir = Path(RESULTS_DIR) / "folds"
+    for record_path in sorted(folds_dir.glob("*.json")):
+        record = json.loads(record_path.read_text())
+        jobname = record.get("colabfold_jobname", record_path.stem)
+        declared = set(record.get("structures", []))
+        struct_dir = Path(RESULTS_DIR) / "structures" / jobname
+        if not struct_dir.is_dir():
+            continue
+        scanned += 1
+        for f in sorted(struct_dir.glob("*.pdb")):
+            if f.name in declared:
+                kept += 1
+            else:
+                removed.append(f"{jobname}/{f.name}")
+                if not dry_run:
+                    f.unlink()
+
+    if not dry_run and removed:
+        results.commit()
+
+    print(
+        f"[prune] scanned {scanned} designs, kept {kept} declared files, "
+        f"{'would remove' if dry_run else 'removed'} {len(removed)}",
+        flush=True,
+    )
+    for name in removed[:20]:
+        print(f"[prune]   {name}", flush=True)
+    return {"scanned": scanned, "kept": kept, "removed": removed, "dry_run": dry_run}
+
+
+@app.local_entrypoint()
+def prune(apply: bool = False):
+    """Report, or with --apply delete, structure files no record declares."""
+    out = prune_stale_structures.remote(dry_run=not apply)
+    print(
+        f"[prune] scanned={out['scanned']} kept={out['kept']} "
+        f"stale={len(out['removed'])} dry_run={out['dry_run']}"
+    )
