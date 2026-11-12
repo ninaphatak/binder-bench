@@ -1,0 +1,5 @@
+metric,role,lower_is_better,n,n_binders,n_non_binders,base_rate,auc,auc_ci_low,auc_ci_high,auc_ci_excludes_half,hanley_mcneil_se,p_vs_half,precision_at_10,precision_at_20,precision_at_50,n_bootstrap,bh_significant
+pae_interface_mean,primary,True,378,53,325,0.1402,0.4599,0.3835,0.5414,False,0.0418,0.33711,0.1,0.1,0.12,10000,False
+pae_interface_contacts_mean,secondary_S1,True,378,53,325,0.1402,0.478,0.3941,0.5648,False,0.0423,0.602609,0.1,0.05,0.18,10000,False
+iptm,secondary_S2,False,378,53,325,0.1402,0.4843,0.4022,0.5679,False,0.0425,0.711054,0.2,0.2,0.12,10000,False
+ipsae,secondary_S3,False,378,53,325,0.1402,0.5124,0.4238,0.6037,False,0.0431,0.772935,0.8,0.5,0.24,10000,False
