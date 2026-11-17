@@ -39,3 +39,7 @@ venv/
 
 # scratch
 data/*.zip
+
+# agent worktrees and local session state
+.claude/
+.pytest_cache/
