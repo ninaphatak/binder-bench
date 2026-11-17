@@ -194,4 +194,9 @@ Giulia Palermo's lab, and is not a Palermo lab output.
 its license retained at `vendor/IPSAE_LICENSE`.
 
 Experimental binding data is from Adaptyv Bio's public EGFR binder design
-competition.
+competition and remains theirs under their own terms. The MIT license below
+covers the code in this repository, not that data.
+
+## License
+
+MIT. See [`LICENSE`](LICENSE).
