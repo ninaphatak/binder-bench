@@ -214,5 +214,3 @@ One line each, dated. Append only.
 - 2026-11-16: Root README.md added, leading with the result. Until now the repo had no root README, so a visitor landed on STATUS.md, which is addressed to Claude and reads as a stalled project. MIT LICENSE added, matching the vendored ipSAE.
 - 2026-11-16: DUAL-USE SCREEN run before publication, at Nina's request, and the conclusion is that nothing here warrants withholding: EGFR is a human oncology target rather than a pathogen or toxin, every sequence came from Adaptyv's public release, the tools are open, and a negative result removes a filter rather than providing one. A short scope and dual-use note was added to the README stating this. The real publication risk was personal information, not biosafety, and the two should not be conflated.
 
-
-
