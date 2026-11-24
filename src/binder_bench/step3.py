@@ -111,20 +111,35 @@ def load_joined(folds_dir: Path | str, designs_parquet: Path | str) -> Joined:
     rows = []
     for d in wanted:
         rec = records[d]
-        if rec["status"] != "folded":
-            raise ValueError(f"{d}: status is {rec['status']!r}, not 'folded'")
-        if rec["metrics"]["n_models"] != 5:
-            raise ValueError(
-                f"{d}: {rec['metrics']['n_models']} models, expected 5. The "
-                f"primary estimator is the mean across five."
-            )
-        n_ipsae = rec["secondary_metrics"]["ipsae"]["ipsae__n_models"]
-        if n_ipsae != 5:
-            raise ValueError(
-                f"{d}: ipSAE averaged {n_ipsae} models, expected 5."
-            )
+        _check_one(
+            d,
+            status=rec["status"],
+            n_models=rec["metrics"]["n_models"],
+            n_ipsae=rec["secondary_metrics"]["ipsae"]["ipsae__n_models"],
+        )
         rows.append({name: _metric_value(rec, name) for name, _, _ in METRICS})
 
+    return _build_joined(wanted, rows, pool)
+
+
+#: Both loaders enforce exactly these conditions, so the CSV path cannot be a
+#: more permissive back door into the pre-registered analysis.
+def _check_one(design_id: str, *, status, n_models, n_ipsae) -> None:
+    if status != "folded":
+        raise ValueError(f"{design_id}: status is {status!r}, not 'folded'")
+    if int(n_models) != 5:
+        raise ValueError(
+            f"{design_id}: {n_models} models, expected 5. The primary "
+            f"estimator is the mean across five."
+        )
+    if int(n_ipsae) != 5:
+        raise ValueError(
+            f"{design_id}: ipSAE averaged {n_ipsae} models, expected 5."
+        )
+
+
+def _build_joined(wanted: list[str], rows: list[dict], pool) -> Joined:
+    """Assemble the frozen Joined and refuse any NaN."""
     metrics = {
         name: np.array([r[name] for r in rows], dtype=float)
         for name, _, _ in METRICS
@@ -143,6 +158,62 @@ def load_joined(folds_dir: Path | str, designs_parquet: Path | str) -> Joined:
         kd=pool["kd"].to_numpy(dtype=float),
         kd_at_ceiling=pool["kd_at_ceiling"].to_numpy().astype(bool),
     )
+
+
+def load_joined_from_metrics(
+    metrics_csv: Path | str, designs_parquet: Path | str
+) -> Joined:
+    """Join the EXPORTED per-design metrics table to the assay outcomes.
+
+    Same population, same refusals and same estimator as ``load_joined``; the
+    only difference is where the metric values come from. This path exists so
+    the published result can be recomputed from what is committed to the
+    repository, without a GPU and without the fold records, which live on a
+    Modal Volume and are far too large for git.
+
+    ``results/tables/per_design_metrics.csv`` is produced by
+    ``scripts/export_per_design_metrics.py`` directly from those fold records.
+    """
+    import pandas as pd
+
+    df = pd.read_parquet(designs_parquet)
+    pool = df[(~df["is_control"]) & df["expressed"]].copy()
+
+    # float_precision="round_trip" is NOT optional. pandas' default CSV float
+    # parser is fast rather than correctly rounded and can land one ulp away
+    # from the value that was written. That is invisible in a printed number
+    # and fatal here: ColabFold rounds ipTM to two decimals, so near-ties are
+    # common, and a one-ulp shift flips a tie and moves a rank statistic in
+    # the fourth decimal. Verified: without this, iptm's bootstrap CI came out
+    # [0.4023, 0.5680] from the CSV against [0.4022, 0.5679] from the fold
+    # records. With it, every table is byte-identical to the fold-record path.
+    table = pd.read_csv(metrics_csv, float_precision="round_trip")
+    if "design_id" not in table.columns:
+        raise ValueError(f"{metrics_csv} has no design_id column")
+    by_id = {str(r["design_id"]): r for _, r in table.iterrows()}
+
+    wanted = list(pool["design_id"])
+    missing = [d for d in wanted if d not in by_id]
+    if missing:
+        raise ValueError(
+            f"{len(missing)} of {len(wanted)} expressed designs are absent "
+            f"from {metrics_csv}, e.g. {missing[:3]}. The denominator is "
+            f"pre-registered at 378, so this must be fixed rather than "
+            f"worked around."
+        )
+
+    rows = []
+    for d in wanted:
+        r = by_id[d]
+        _check_one(
+            d,
+            status=r["status"],
+            n_models=r["n_models"],
+            n_ipsae=r["ipsae__n_models"],
+        )
+        rows.append({name: float(r[name]) for name, _, _ in METRICS})
+
+    return _build_joined(wanted, rows, pool)
 
 
 def _normal_two_sided_p(z: float) -> float:

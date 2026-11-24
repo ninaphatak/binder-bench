@@ -151,13 +151,29 @@ affect how this should be read:
 
 ```bash
 uv sync
-uv run pytest                                  # unit tests
-uv run python scripts/run_step3.py --folds <dir>   # the statistics, from folded structures
+uv run pytest        # 371 tests, no GPU, no network, about 40 seconds
+uv run python scripts/run_step3.py --metrics results/tables/per_design_metrics.csv
 ```
 
-Folding the full set requires a Modal account and roughly $35 of GPU time. The
-derived tables that the result is computed from are committed under
-`results/tables/`.
+The second command recomputes **every number in the tables above** from
+`results/tables/per_design_metrics.csv`, which holds one row per folded design:
+the five-model mean for each of the four metrics, the spread, and the model
+count. No GPU, no Modal account, no network. It overwrites the committed tables
+in place, so `git diff` after running it is the check: an empty diff means the
+published result is exactly what this code produces from this data.
+
+That table was exported from the fold records with
+`scripts/export_per_design_metrics.py`. The records themselves, with the
+structures and the raw PAE matrices, are gigabytes and live on a Modal Volume.
+Re-folding from sequences needs a Modal account and roughly $38 of GPU time:
+
+```bash
+uv run modal run modal_app/fold.py          # 380 designs, five models each
+uv run python scripts/run_step3.py --folds <dir>
+```
+
+Both paths apply the same population, the same refusals and the same estimator,
+and a test asserts they agree.
 
 ## Layout
 
@@ -167,16 +183,18 @@ ANALYSIS_PLAN.md     pre-registered, committed before any statistic was computed
 PRIOR_ART.md         what BindCraft, EvoBind2 and UnibindMD claim, and on what evidence
 DECISIONS.md         running decision log, dated, one line each
 results/README.md    full numbers and all caveats
-results/tables/      AUC and CI per metric, Spearman, decile calibration, summary JSON
+results/tables/      per-design metrics (the analysis input), plus AUC, CI,
+                     Spearman, decile calibration and the summary JSON
 src/binder_bench/    pipeline: folding config, MSA, parsing, metrics, geometry, statistics
 modal_app/           Modal app definitions
 tests/               unit tests
 data/                designs and submissions tables, target sequence, binding definition
 ```
 
-`STATUS.md` and `CLAUDE.md` are working files addressed to the coding agent used on
-this project, not to a reader. They are committed because the agent's operating
-constraints are part of how the result was produced.
+Two working files addressed to the coding agent used on this project, `CLAUDE.md`
+and a session handoff file, are not included here; a few `DECISIONS.md` entries
+refer to them. `SPEC.md` and `ANALYSIS_PLAN.md` are the documents that govern the
+science, and both are here.
 
 ## Status
 

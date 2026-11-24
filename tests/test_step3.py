@@ -194,3 +194,103 @@ def test_apply_bh_does_not_mutate_its_input():
     rows = [{"metric": "a", "p_vs_half": 0.01}]
     apply_bh(rows, "p_vs_half")
     assert "bh_significant" not in rows[0]
+
+
+# ---------------------------------------------------------------------------
+# The committed-CSV loader, which is how a reader without a GPU reproduces
+# the published result
+# ---------------------------------------------------------------------------
+
+
+def _tiny_population(tmp_path, *, n_models=5, n_ipsae=5, status="folded"):
+    """A 3-design population written as both a parquet and a metrics CSV."""
+    import pandas as pd
+
+    ids = ["d0", "d1", "d2"]
+    pd.DataFrame(
+        {
+            "design_id": ids,
+            "is_control": [False] * 3,
+            "expressed": [True] * 3,
+            "binds": [True, False, False],
+            "kd": [1e-8, float("nan"), float("nan")],
+            "kd_at_ceiling": [False] * 3,
+        }
+    ).to_parquet(tmp_path / "designs.parquet")
+
+    csv_path = tmp_path / "metrics.csv"
+    pd.DataFrame(
+        {
+            "design_id": ids,
+            "status": [status] * 3,
+            "n_models": [n_models] * 3,
+            "ipsae__n_models": [n_ipsae] * 3,
+            # A value whose decimal form needs all 17 digits to round-trip.
+            "pae_interface_mean": [0.1 + 0.2, 20.0, 25.0],
+            "pae_interface_contacts_mean": [10.0, 14.0, 19.0],
+            "iptm": [0.7, 0.3, 0.2],
+            "ipsae": [0.6, 0.1, 0.05],
+        }
+    ).to_csv(csv_path, index=False)
+    return csv_path, tmp_path / "designs.parquet"
+
+
+def test_metrics_csv_loader_reads_the_prespecified_population(tmp_path):
+    from binder_bench.step3 import load_joined_from_metrics
+
+    csv_path, parquet = _tiny_population(tmp_path)
+    j = load_joined_from_metrics(csv_path, parquet)
+    assert j.design_ids == ["d0", "d1", "d2"]
+    assert j.binds.tolist() == [True, False, False]
+    assert set(j.metrics) == {m[0] for m in METRICS}
+
+
+def test_metrics_csv_round_trips_floats_exactly(tmp_path):
+    """pandas' default CSV float parser is fast, not correctly rounded, and can
+    land one ulp off. ColabFold rounds ipTM to two decimals so near-ties are
+    common, and a flipped tie moves a rank statistic. Without
+    float_precision="round_trip" the published CSV did not reproduce the
+    fold-record tables."""
+    from binder_bench.step3 import load_joined_from_metrics
+
+    csv_path, parquet = _tiny_population(tmp_path)
+    j = load_joined_from_metrics(csv_path, parquet)
+    assert j.metrics["pae_interface_mean"][0] == 0.1 + 0.2
+    assert j.metrics["pae_interface_mean"][0].hex() == (0.1 + 0.2).hex()
+
+
+def test_metrics_csv_loader_refuses_an_incomplete_model_set(tmp_path):
+    from binder_bench.step3 import load_joined_from_metrics
+
+    csv_path, parquet = _tiny_population(tmp_path, n_models=4)
+    with pytest.raises(ValueError, match="expected 5"):
+        load_joined_from_metrics(csv_path, parquet)
+
+
+def test_metrics_csv_loader_refuses_partial_ipsae(tmp_path):
+    from binder_bench.step3 import load_joined_from_metrics
+
+    csv_path, parquet = _tiny_population(tmp_path, n_ipsae=3)
+    with pytest.raises(ValueError, match="ipSAE averaged 3"):
+        load_joined_from_metrics(csv_path, parquet)
+
+
+def test_metrics_csv_loader_refuses_a_design_that_is_not_folded(tmp_path):
+    from binder_bench.step3 import load_joined_from_metrics
+
+    csv_path, parquet = _tiny_population(tmp_path, status="failed")
+    with pytest.raises(ValueError, match="not 'folded'"):
+        load_joined_from_metrics(csv_path, parquet)
+
+
+def test_metrics_csv_loader_refuses_a_missing_design_rather_than_shrinking(tmp_path):
+    """Dropping a design would silently move the pre-registered denominator."""
+    import pandas as pd
+
+    from binder_bench.step3 import load_joined_from_metrics
+
+    csv_path, parquet = _tiny_population(tmp_path)
+    short = pd.read_csv(csv_path).iloc[:2]
+    short.to_csv(csv_path, index=False)
+    with pytest.raises(ValueError, match="absent from"):
+        load_joined_from_metrics(csv_path, parquet)

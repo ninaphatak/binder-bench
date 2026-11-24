@@ -46,6 +46,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -177,7 +178,7 @@ def compute_ipsae(
     ptm: float | None = None,
     pae_cutoff: float = IPSAE_PAE_CUTOFF,
     dist_cutoff: float = IPSAE_DIST_CUTOFF,
-    python: str = "python3",
+    python: str | None = None,
 ) -> IpsaeResult:
     """Run the vendored ipSAE on one predicted structure and its PAE matrix.
 
@@ -186,6 +187,15 @@ def compute_ipsae(
     files next to the structures Step 4 reads.
     """
     assert_reference_script_unmodified()
+
+    # Default to the interpreter we are already running under, not to whatever
+    # "python3" means on PATH. ipsae.py needs numpy, and outside an activated
+    # virtualenv "python3" is the system interpreter, which does not have it.
+    # That made three tests fail for anyone who ran pytest as
+    # ".venv/bin/python -m pytest" instead of "uv run pytest", with an error
+    # pointing at the vendored script rather than at the interpreter choice.
+    if python is None:
+        python = sys.executable
 
     structure_path = Path(structure_path)
     if not structure_path.exists():
