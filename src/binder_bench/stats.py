@@ -285,3 +285,63 @@ def benjamini_hochberg(pvalues: list[float], alpha: float = 0.05) -> list[bool]:
     if len(cutoff):
         out[order[: cutoff[-1] + 1]] = True
     return out.tolist()
+
+
+def roc_curve(
+    scores: np.ndarray, labels: np.ndarray, *, lower_is_better: bool
+) -> tuple[np.ndarray, np.ndarray]:
+    """False-positive and true-positive rates over every threshold.
+
+    Returned for plotting only; ``auc`` is computed from the rank relationship
+    and never from the area under these points, so a bug here cannot move a
+    reported statistic. Direction is explicit, as everywhere else in this
+    module.
+
+    Ties are handled by stepping through all samples that share a score at
+    once, which is what keeps a metric with heavy ties (ColabFold rounds ipTM
+    to two decimals) from drawing a staircase that implies resolution it does
+    not have.
+    """
+    scores = np.asarray(scores, dtype=float)
+    labels = np.asarray(labels).astype(bool)
+    if scores.shape != labels.shape:
+        raise ValueError("scores and labels must have the same shape")
+    if labels.all() or (~labels).all():
+        raise ValueError("a ROC curve needs both classes")
+
+    # Orient so that LARGER always means "more likely to bind".
+    oriented = -scores if lower_is_better else scores
+    order = np.argsort(-oriented, kind="mergesort")
+    y = labels[order]
+    s = oriented[order]
+
+    n_pos = int(labels.sum())
+    n_neg = int((~labels).sum())
+
+    tp = np.cumsum(y)
+    fp = np.cumsum(~y)
+
+    # Keep only the last index of each run of equal scores, so tied samples
+    # produce one point rather than an arbitrary ordering among themselves.
+    keep = np.r_[np.diff(s) != 0, True]
+    tpr = np.r_[0.0, tp[keep] / n_pos]
+    fpr = np.r_[0.0, fp[keep] / n_neg]
+    return fpr, tpr
+
+
+def cumulative_precision(
+    scores: np.ndarray, labels: np.ndarray, *, lower_is_better: bool
+) -> np.ndarray:
+    """Bind rate within the top k, for every k from 1 to n.
+
+    ``out[k - 1]`` is precision at k. Plotting the whole curve rather than the
+    three pre-registered k values is deliberate: it shows where an effect lives
+    and where it decays, so a reader can see that the reported k were not
+    chosen to flatter a spike.
+    """
+    scores = np.asarray(scores, dtype=float)
+    labels = np.asarray(labels).astype(bool)
+    oriented = -scores if lower_is_better else scores
+    order = np.argsort(-oriented, kind="mergesort")
+    y = labels[order]
+    return np.cumsum(y) / np.arange(1, len(y) + 1)

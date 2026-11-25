@@ -11,6 +11,16 @@ of binding. This benchmark tests that claim against experimental binding data,
 with the analysis pre-registered before any outcome was examined. All four
 metrics sit at chance.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="results/figures/headline_dark.png">
+  <img alt="Left: ROC curves for four AlphaFold interface confidence metrics, all lying on the no-skill diagonal, AUC 0.460 to 0.512. Right: share of the top k designs that bind, against a 14% base rate; ipSAE reaches 80% at k=10 and decays to the base rate by k=100, while the other three metrics stay at or below the base rate throughout." src="results/figures/headline_light.png">
+</picture>
+
+<sub>Regenerate with `uv run --group figures python scripts/make_figures.py`. Both
+panels are drawn from the same table the statistics read, and the ROC helper is
+tested against the reported AUC so the picture cannot disagree with the
+numbers.</sub>
+
 ---
 
 ## The result
@@ -153,6 +163,7 @@ affect how this should be read:
 uv sync
 uv run pytest        # 371 tests, no GPU, no network, about 40 seconds
 uv run python scripts/run_step3.py --metrics results/tables/per_design_metrics.csv
+uv run --group figures python scripts/make_figures.py   # redraws the figure above
 ```
 
 The second command recomputes **every number in the tables above** from
@@ -185,6 +196,7 @@ DECISIONS.md         running decision log, dated, one line each
 results/README.md    full numbers and all caveats
 results/tables/      per-design metrics (the analysis input), plus AUC, CI,
                      Spearman, decile calibration and the summary JSON
+results/figures/     the headline figure, light and dark
 src/binder_bench/    pipeline: folding config, MSA, parsing, metrics, geometry, statistics
 modal_app/           Modal app definitions
 tests/               unit tests

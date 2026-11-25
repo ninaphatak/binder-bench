@@ -18,8 +18,10 @@ from binder_bench.stats import (
     bootstrap_correlation,
     calibration_by_decile,
     hanley_mcneil_se,
+    cumulative_precision,
     pearson,
     precision_at_k,
+    roc_curve,
     spearman,
 )
 
@@ -276,3 +278,75 @@ def test_estimate_record_is_rounded_for_reporting():
     e = Estimate(0.123456, 0.1, 0.2, 378, 10000)
     assert e.as_record()["value"] == 0.1235
     assert e.as_record()["n"] == 378
+
+
+# ---------------------------------------------------------------------------
+# Curves, for the figure only
+# ---------------------------------------------------------------------------
+
+
+def test_roc_curve_starts_at_origin_and_ends_at_one_one():
+    rng = np.random.default_rng(29)
+    scores = rng.normal(size=200)
+    labels = rng.integers(0, 2, size=200).astype(bool)
+    fpr, tpr = roc_curve(scores, labels, lower_is_better=False)
+    assert (fpr[0], tpr[0]) == (0.0, 0.0)
+    assert fpr[-1] == pytest.approx(1.0)
+    assert tpr[-1] == pytest.approx(1.0)
+
+
+def test_roc_curve_is_monotone_in_both_coordinates():
+    rng = np.random.default_rng(31)
+    scores = rng.normal(size=300)
+    labels = (rng.random(300) < 0.14).astype(bool)
+    fpr, tpr = roc_curve(scores, labels, lower_is_better=False)
+    assert np.all(np.diff(fpr) >= 0)
+    assert np.all(np.diff(tpr) >= 0)
+
+
+def test_roc_curve_area_agrees_with_the_reported_auc():
+    """The figure and the headline must not disagree. auc() is computed from
+    ranks, the curve from thresholds; trapezoid area over the curve has to land
+    on the same number or one of them is wrong."""
+    rng = np.random.default_rng(37)
+    scores = rng.normal(size=400)
+    labels = (rng.random(400) < 0.2).astype(bool)
+    for direction in (True, False):
+        fpr, tpr = roc_curve(scores, labels, lower_is_better=direction)
+        assert np.trapezoid(tpr, fpr) == pytest.approx(
+            auc(scores, labels, lower_is_better=direction), abs=1e-9
+        )
+
+
+def test_roc_curve_respects_direction():
+    scores = np.array([1.0, 2.0, 3.0, 4.0])
+    labels = np.array([1, 1, 0, 0]).astype(bool)
+    assert np.trapezoid(*reversed(roc_curve(
+        scores, labels, lower_is_better=True))) == pytest.approx(1.0)
+
+
+def test_roc_curve_collapses_ties_into_one_point():
+    """ipTM is rounded to two decimals upstream, so ties are dense. A curve
+    that steps once per sample would imply resolution the metric lacks."""
+    scores = np.array([1.0, 1.0, 1.0, 1.0, 2.0])
+    labels = np.array([1, 0, 1, 0, 1]).astype(bool)
+    fpr, _ = roc_curve(scores, labels, lower_is_better=False)
+    assert len(fpr) == 3  # origin, the 2.0 group, the tied 1.0 group
+
+
+def test_cumulative_precision_matches_precision_at_k():
+    rng = np.random.default_rng(41)
+    scores = rng.normal(size=120)
+    labels = (rng.random(120) < 0.3).astype(bool)
+    curve = cumulative_precision(scores, labels, lower_is_better=False)
+    for k in (1, 7, 25, 120):
+        assert curve[k - 1] == pytest.approx(
+            precision_at_k(scores, labels, k, lower_is_better=False)
+        )
+
+
+def test_cumulative_precision_ends_at_the_base_rate():
+    labels = np.array([True] * 53 + [False] * 325)
+    scores = np.arange(378, dtype=float)
+    curve = cumulative_precision(scores, labels, lower_is_better=False)
+    assert curve[-1] == pytest.approx(53 / 378)
